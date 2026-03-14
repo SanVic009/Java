@@ -1,0 +1,44 @@
+{
+    "exam_id": "exam_2026_02",
+    "video_path": "/path/to/classroom_video.mp4",
+    "fps_sampling": 5,
+    "baseline_duration_sec": 60,
+    "seat_map": [
+        {
+            "seat_id": 1,
+            "student_id": 101,
+            "bbox": [100, 100, 250, 300],
+            "neighbor_seat_ids": [2, 4]
+        },
+        {
+            "seat_id": 2,
+            "student_id": 102,
+            "bbox": [260, 100, 410, 300],
+            "neighbor_seat_ids": [1, 3, 5]
+        },
+        {
+            "seat_id": 3,
+            "student_id": 103,
+            "bbox": [420, 100, 570, 300],
+            "neighbor_seat_ids": [2, 6]
+        },
+        {
+            "seat_id": 4,
+            "student_id": 104,
+            "bbox": [100, 310, 250, 510],
+            "neighbor_seat_ids": [1, 5]
+        },
+        {
+            "seat_id": 5,
+            "student_id": 105,
+            "bbox": [260, 310, 410, 510],
+            "neighbor_seat_ids": [2, 4, 6]
+        },
+        {
+            "seat_id": 6,
+            "student_id": 106,
+            "bbox": [420, 310, 570, 510],
+            "neighbor_seat_ids": [3, 5]
+        }
+    ]
+}

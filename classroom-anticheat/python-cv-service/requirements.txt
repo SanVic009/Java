@@ -1,0 +1,23 @@
+# Classroom Anti-Cheat CV Service
+# Python dependencies - pinned versions
+
+# Web Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+
+# Computer Vision
+opencv-python==4.9.0.80
+numpy==1.26.3
+
+# ML Models
+ultralytics==8.1.0  # YOLOv8
+mediapipe==0.10.9
+
+# Tracking
+lap==0.4.0  # For ByteTrack
+scipy==1.12.0
+filterpy==1.4.5
+
+# Utilities
+python-multipart==0.0.6

@@ -1,0 +1,7 @@
+{
+    "exam_id": "exam_2026_01",
+    "video_path": "/path/to/classroom_video.mp4",
+    "fps_sampling": 5,
+    "baseline_duration_sec": 60,
+    "discovery_duration_sec": 120
+}
