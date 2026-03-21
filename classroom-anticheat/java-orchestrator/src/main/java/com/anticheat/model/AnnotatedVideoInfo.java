@@ -10,7 +10,7 @@ public class AnnotatedVideoInfo {
     @SerializedName("file_path")
     private String filePath;
 
-    private String status; // processing | ready | failed
+    private String status; // rendering | ready | failed | not_requested
 
     // resolution: { width, height }
     private Map<String, Object> resolution;
