@@ -4,7 +4,17 @@ export const EMPTY_RESULT = {
   exam_id: '',
   results: [],
   annotated_video_path: '',
+  annotated_video_status: 'not_requested',
 };
+
+export function normalizeResult(resultPayload) {
+  const root = resultPayload?.result ?? resultPayload ?? {};
+  return Array.isArray(root?.result?.results)
+    ? root.result.results
+    : Array.isArray(root?.results)
+      ? root.results
+      : [];
+}
 
 export function normalizeSignal(raw) {
   const value = String(raw || '').replace(/[_\s]+/g, '').toLowerCase();
@@ -38,11 +48,16 @@ export function resolveVideoPath(path) {
 
 export function parseBackendPayload(payload) {
   const root = payload?.result ?? payload ?? {};
-  const tracks = Array.isArray(root.results)
-    ? root.results
+  const tracks = Array.isArray(normalizeResult(payload))
+    ? normalizeResult(payload)
     : Array.isArray(root.tracks)
       ? root.tracks
       : [];
+
+  const annotatedVideo =
+    root?.annotated_video && typeof root.annotated_video === 'object'
+      ? root.annotated_video
+      : null;
 
   return {
     exam_id: root.exam_id || root.examId || '',
@@ -62,9 +77,11 @@ export function parseBackendPayload(payload) {
     })),
     annotated_video_path:
       root.annotated_video_path ||
-      root.annotated_video ||
+      (typeof root.annotated_video === 'string' ? root.annotated_video : null) ||
       root.annotated_video_url ||
-      root?.annotated_video?.file_path ||
+      annotatedVideo?.file_path ||
       '',
+    annotated_video_status: annotatedVideo?.status || 'not_requested',
+    error: payload?.error || null,
   };
 }

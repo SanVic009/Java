@@ -2,6 +2,8 @@
 
 Offline classroom anti-cheat analysis system that processes CCTV video after exams and outputs per-student suspicious timestamp intervals.
 
+> New: For a complete code-faithful reconstruction guide, see **DETAILED_REBUILD_GUIDE.md**.
+
 ## Architecture
 
 ```
@@ -32,6 +34,9 @@ source venv/bin/activate  # Linux/Mac
 
 # Install dependencies
 pip install -r requirements.txt
+
+# Download YOLO model weights if missing
+cd .. && ./download_models.sh && cd python-cv-service
 
 # Start service
 python main.py
@@ -103,14 +108,14 @@ For each student, computes:
 | Signal | Condition | Weight |
 |--------|-----------|--------|
 | HeadSignal | `\|adj_yaw\| > max(25°, 2 × yaw_std)` | 0.35 |
-| GazeSignal | `\|adj_gaze\| > 0.4` | 0.25 |
-| ProximitySignal | `neighbor_dist < baseline × 0.7` | 0.55 |
+| GazeSignal | `\|adj_gaze\| > 0.4` | 0.22 |
+| ProximitySignal | `neighbor_dist < baseline × 0.7` | 0.43 |
 
 ### Scoring
 
 Per-frame score:
 ```
-S(t) = 0.35 × HeadSignal + 0.25 × GazeSignal + 0.55 × ProximitySignal
+S(t) = 0.35 × HeadSignal + 0.22 × GazeSignal + 0.43 × ProximitySignal
 ```
 
 Frame is suspicious if `S(t) >= 0.75`

@@ -11,6 +11,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Map;
 
 /**
  * HTTP client for communicating with the Python CV service.
@@ -21,18 +22,27 @@ public class AnalysisClient {
     private static final String STATUS_ENDPOINT_PREFIX = "/status/";
     private static final String RESULT_ENDPOINT_PREFIX = "/result/";
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(30); // Long timeout for video processing
-    private static final Duration POLL_INTERVAL = Duration.ofSeconds(2);
+    private static final int POLL_INTERVAL_MS = 3000;
+    private static final int MAX_POLL_ATTEMPTS = 2400;
 
     private final String baseUrl;
     private final HttpClient httpClient;
     private final Gson gson;
+    private final int pollIntervalMs;
+    private final int maxPollAttempts;
 
     public AnalysisClient() {
-        this(DEFAULT_BASE_URL);
+        this(DEFAULT_BASE_URL, POLL_INTERVAL_MS, MAX_POLL_ATTEMPTS);
     }
 
     public AnalysisClient(String baseUrl) {
+        this(baseUrl, POLL_INTERVAL_MS, MAX_POLL_ATTEMPTS);
+    }
+
+    public AnalysisClient(String baseUrl, int pollIntervalMs, int maxPollAttempts) {
         this.baseUrl = baseUrl;
+        this.pollIntervalMs = Math.max(250, pollIntervalMs);
+        this.maxPollAttempts = Math.max(1, maxPollAttempts);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
             .version(HttpClient.Version.HTTP_1_1)
@@ -83,28 +93,39 @@ public class AnalysisClient {
     }
 
     public AnalysisResponse waitForResult(String jobId) throws AnalysisException {
-        long start = System.currentTimeMillis();
-        while (true) {
-            if (System.currentTimeMillis() - start > DEFAULT_TIMEOUT.toMillis()) {
-                throw new AnalysisException("Timed out waiting for job result: " + jobId);
-            }
+        int pollCount = 0;
+        while (pollCount < maxPollAttempts) {
+            pollCount += 1;
 
             JobStatus status = getJobStatus(jobId);
             if (status.status.equalsIgnoreCase("completed")) {
                 return getResult(jobId);
             }
             if (status.status.equalsIgnoreCase("failed")) {
-                throw new AnalysisException("Job failed: " + status.message);
+                throw new AnalysisException(getFailedJobMessage(jobId, status.message));
             }
 
-            System.out.println("Job " + jobId + " status=" + status.status + " progress=" + status.progress);
+            if (pollCount % 10 == 0) {
+                String msg = status.message == null ? "" : status.message;
+                int pct = (int) Math.round(status.progress * 100.0);
+                System.out.println(
+                        "[Poll " + pollCount + "/" + maxPollAttempts + "] Status: "
+                                + status.status + " — " + msg + " (" + pct + "%)"
+                );
+            }
+
             try {
-                Thread.sleep(POLL_INTERVAL.toMillis());
+                Thread.sleep(pollIntervalMs);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 throw new AnalysisException("Interrupted while polling job: " + jobId, ie);
             }
         }
+
+        throw new RuntimeException(
+                "Job " + jobId + " did not complete within the maximum wait time. " +
+                "The Python service may still be running. Check job_store/" + jobId + "/status.json"
+        );
     }
 
     private AnalysisResponse getResult(String jobId) throws AnalysisException {
@@ -123,7 +144,12 @@ public class AnalysisClient {
             }
 
             // Expected JSON: { job_id, status, result: { ...AnalysisResponse... }, error }
-            java.util.Map<?, ?> body = gson.fromJson(response.body(), java.util.Map.class);
+            Map<?, ?> body = gson.fromJson(response.body(), Map.class);
+            Object statusObj = body.get("status");
+            if (statusObj != null && "failed".equalsIgnoreCase(statusObj.toString())) {
+                throw new AnalysisException(getFailedMessageFromBody(jobId, body));
+            }
+
             Object resultObj = body.get("result");
             if (resultObj == null) {
                 throw new AnalysisException("Job result not present yet for job_id: " + jobId);
@@ -151,7 +177,7 @@ public class AnalysisClient {
                         + ", body: " + response.body());
             }
 
-            java.util.Map<?, ?> body = gson.fromJson(response.body(), java.util.Map.class);
+            Map<?, ?> body = gson.fromJson(response.body(), Map.class);
             JobStatus status = new JobStatus();
             status.jobId = jobId;
             status.status = body.get("status").toString();
@@ -163,6 +189,39 @@ public class AnalysisClient {
         } catch (Exception e) {
             throw new AnalysisException("Failed to fetch status for job: " + jobId + " (" + e.getMessage() + ")", e);
         }
+    }
+
+    private String getFailedJobMessage(String jobId, String fallback) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + RESULT_ENDPOINT_PREFIX + jobId))
+                    .header("Content-Type", "application/json")
+                    .timeout(DEFAULT_TIMEOUT)
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                return fallback == null ? "Job failed." : fallback;
+            }
+
+            Map<?, ?> body = gson.fromJson(response.body(), Map.class);
+            return getFailedMessageFromBody(jobId, body);
+        } catch (Exception e) {
+            return fallback == null ? "Job failed." : fallback;
+        }
+    }
+
+    private String getFailedMessageFromBody(String jobId, Map<?, ?> body) {
+        Object errorObj = body.get("error");
+        if (errorObj instanceof Map<?, ?> errorMap) {
+            String message = errorMap.get("message") == null ? "Job failed." : errorMap.get("message").toString();
+            String failedPhase = errorMap.get("failed_phase") == null ? "unknown" : errorMap.get("failed_phase").toString();
+            boolean phase1Artifacts = Boolean.parseBoolean(String.valueOf(errorMap.get("phase1_artifacts_available")));
+            return "Job " + jobId + " failed in " + failedPhase + ": " + message
+                    + " (phase1_artifacts_available=" + phase1Artifacts + ")";
+        }
+        return "Job " + jobId + " failed.";
     }
 
     private static class JobStatus {

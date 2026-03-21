@@ -6,7 +6,7 @@ Note: This service is track-centric (per ByteTrack track_id) and uncertainty-awa
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class AnalysisRequest(BaseModel):
@@ -20,6 +20,13 @@ class AnalysisRequest(BaseModel):
 
     # Phase 3 rendering (pure visualization; no CV inference). Default off.
     render_annotated_video: bool = False
+
+    @field_validator("video_path")
+    @classmethod
+    def no_traversal(cls, v: str) -> str:
+        if ".." in v:
+            raise ValueError("video_path must not contain directory traversal sequences.")
+        return v
 
 
 class AnalyzeJobCreateResponse(BaseModel):
@@ -78,7 +85,7 @@ class JobResultResponse(BaseModel):
     job_id: str
     status: str
     result: Optional[AnalysisResponse] = None
-    error: Optional[str] = None
+    error: Optional[Dict[str, Any]] = None
 
 
 class HealthResponse(BaseModel):

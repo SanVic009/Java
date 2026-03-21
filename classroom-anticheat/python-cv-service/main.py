@@ -120,7 +120,13 @@ def _release_lock(job_id: str) -> None:
         pass
 
 
-def _update_status(job_id: str, status: str, progress: float = 0.0, message: Optional[str] = None) -> None:
+def _update_status(
+    job_id: str,
+    status: str,
+    progress: float = 0.0,
+    message: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> None:
     path = _status_path(job_id)
     payload: Dict[str, Any] = {}
     if path.exists():
@@ -134,6 +140,8 @@ def _update_status(job_id: str, status: str, progress: float = 0.0, message: Opt
             "updated_at": _now_iso(),
         }
     )
+    if extra:
+        payload.update(extra)
     _write_json(path, payload)
 
 
@@ -143,28 +151,34 @@ def _run_job(job_id: str, request_dict: Dict[str, Any]) -> None:
         return
 
     try:
-        _update_status(job_id, status="running", progress=0.05, message="Starting pipeline")
+        _update_status(
+            job_id,
+            status="running",
+            progress=0.05,
+            message="Starting pipeline",
+            extra={
+                "annotated_video_status": "not_requested",
+                "failed_phase": None,
+                "phase1_complete": False,
+                "phase2_complete": False,
+                "error": None,
+            },
+        )
         request = AnalysisRequest.model_validate(request_dict)
 
-        # Resume-friendly progress hints.
         job_dir = _job_dir(job_id)
-        features_path = job_dir / "phase1_features.jsonl"
-        track_meta_path = job_dir / "phase1_track_meta.json"
         results_path = _phase2_results_path(job_id)
 
-        had_phase1 = features_path.exists() and track_meta_path.exists()
-        had_phase2 = results_path.exists()
-
         processor = VideoProcessor(request)
-        payload = processor.run(job_dir)
+        processor.run(job_dir, status_path=_status_path(job_id))
 
         # Post-process: ensure result JSON exists where GET /result expects.
-        if results_path.exists():
+        if results_path.exists() and _read_json(_status_path(job_id)).get("status") != "failed":
             _update_status(job_id, status="completed", progress=1.0, message="Completed")
         else:
             _update_status(job_id, status="failed", progress=0.0, message="Results missing after run")
     except Exception as e:
-        _update_status(job_id, status="failed", progress=0.0, message=str(e))
+        _update_status(job_id, status="failed", progress=0.0, message=str(e), extra={"error": str(e)})
     finally:
         _release_lock(job_id)
 
@@ -220,6 +234,26 @@ async def get_result(job_id: str):
 
     status_payload = _read_json(status_path)
     status = status_payload.get("status", "queued")
+    annotated_video_status = status_payload.get("annotated_video_status", "not_requested")
+
+    if status == "failed":
+        failed_phase = status_payload.get("failed_phase")
+        error_message = status_payload.get("error") or status_payload.get("message") or "Job failed"
+        phase1_available = bool(status_payload.get("phase1_complete", False))
+        return JobResultResponse(
+            job_id=job_id,
+            status="failed",
+            result=None,
+            error={
+                "message": (
+                    f"{failed_phase.title() if failed_phase else 'Pipeline'} failed: {error_message}"
+                    if failed_phase
+                    else error_message
+                ),
+                "failed_phase": failed_phase,
+                "phase1_artifacts_available": phase1_available,
+            },
+        )
 
     if results_path.exists():
         result_payload = json.loads(results_path.read_text(encoding="utf-8"))
@@ -230,15 +264,24 @@ async def get_result(job_id: str):
                 req = json.loads(req_path.read_text(encoding="utf-8"))
                 result_payload["exam_id"] = req.get("exam_id")
 
+        annotated_video = result_payload.get("annotated_video")
+        if isinstance(annotated_video, dict):
+            annotated_video["status"] = annotated_video_status
+        else:
+            result_payload["annotated_video"] = {
+                "file_path": str(_job_dir(job_id) / "phase2_annotated.mp4"),
+                "status": annotated_video_status,
+            }
+
         return JobResultResponse(
             job_id=job_id,
-            status="completed",
+            status=status,
             result=AnalysisResponse.model_validate(result_payload),
             error=None,
         )
 
     # If results aren't ready, attempt resume if the job isn't actively running.
-    if status in ("failed", "queued"):
+    if status == "queued":
         req_path = _request_path(job_id)
         if not req_path.exists():
             raise HTTPException(status_code=500, detail="Request missing; cannot resume")

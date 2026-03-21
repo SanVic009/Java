@@ -18,10 +18,15 @@ class Config:
     GAZE_THRESHOLD: float = 0.4
     PROXIMITY_RATIO: float = 0.7
     
-    # Signal weights
-    WEIGHT_HEAD: float = 0.35
-    WEIGHT_GAZE: float = 0.25
-    WEIGHT_PROXIMITY: float = 0.55
+    # Signal weights (must sum to 1.0)
+    HEAD_WEIGHT: float = 0.35
+    GAZE_WEIGHT: float = 0.22
+    PROXIMITY_WEIGHT: float = 0.43
+
+    # Backward-compatible aliases
+    WEIGHT_HEAD: float = HEAD_WEIGHT
+    WEIGHT_GAZE: float = GAZE_WEIGHT
+    WEIGHT_PROXIMITY: float = PROXIMITY_WEIGHT
     
     # Scoring
     SUSPICIOUS_THRESHOLD: float = 0.75
@@ -68,7 +73,16 @@ class Config:
     PROXIMITY_DISTANCE_RATIO_THRESHOLD: float = 0.7  # current_dist < baseline_dist * ratio triggers proximity anomaly
 
     # Temporal aggregation (robust hysteresis + smoothing)
-    EMA_ALPHA: float = 0.2
+    EMA_ALPHA_BASE: float = 0.2
+    # NOTE: With alpha=0.2 and enter_threshold=0.6, the minimum detectable
+    # suspicious event duration is approximately ceil(log(1-0.6) / log(1-0.2))
+    # frames = ~4-5 frames. At FPS_SAMPLING=5, this is ~1 second.
+    # Increase alpha (e.g. 0.35) to detect shorter events at the cost of more flicker.
+    # Decrease alpha (e.g. 0.1) for smoother, slower-responding detection.
+    EMA_ALPHA_FAST: float = 0.35  # used when fps_sampling >= 10 (higher temporal resolution)
+
+    # Backward-compatible alias
+    EMA_ALPHA: float = EMA_ALPHA_BASE
     SUSPICION_ENTER_THRESHOLD: float = 0.6
     SUSPICION_EXIT_THRESHOLD: float = 0.45
     MIN_INTERVAL_DURATION_SEC: float = 3.0
@@ -79,10 +93,21 @@ class Config:
     EFFECTIVE_SCORE_CEILING: float = 0.5
 
     # Phase 2 teacher/event suppression heuristics
-    TEACHER_CUMULATIVE_TRAVEL_THRESHOLD: float = 2000.0
-    TEACHER_SPATIAL_VARIANCE_THRESHOLD: float = 15000.0
-    SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD: float = 0.25
-    SIMULTANEOUS_EVENT_MIN_TRACKS: int = 4
+    TEACHER_MIN_CUMULATIVE_TRAVEL_PX: float = 2000.0   # must satisfy BOTH conditions
+    TEACHER_MIN_SPATIAL_VARIANCE: float = 15000.0      # must satisfy BOTH conditions
+    TEACHER_MIN_TRACK_AGE_SEC: float = 30.0            # track must be old enough before classification
+
+    # Backward-compatible aliases
+    TEACHER_CUMULATIVE_TRAVEL_THRESHOLD: float = TEACHER_MIN_CUMULATIVE_TRAVEL_PX
+    TEACHER_SPATIAL_VARIANCE_THRESHOLD: float = TEACHER_MIN_SPATIAL_VARIANCE
+
+    SIMULTANEOUS_SUPPRESSION_FRACTION: float = 0.40
+    SIMULTANEOUS_SUPPRESSION_MIN_TRACKS: int = 3
+    SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD: float = 0.25
+
+    # Backward-compatible aliases
+    SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD: float = SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD
+    SIMULTANEOUS_EVENT_MIN_TRACKS: int = SIMULTANEOUS_SUPPRESSION_MIN_TRACKS
     TEACHER_PROXIMITY_SUPPRESSION_RADIUS: float = 120.0
 
     # ID switch observability (heuristic; without ground truth it is an approximation)
@@ -91,6 +116,7 @@ class Config:
 
     # Async job-based API storage
     JOB_STORAGE_DIR: str = "job_store"
+    ALLOWED_VIDEO_BASE_DIRS: list[str] = None
 
     # Phase 3: annotated video rendering (pure visualization; no CV inference)
     RENDER_ANNOTATED_VIDEO_DEFAULT: bool = False
@@ -112,3 +138,10 @@ class Config:
 
 
 config = Config()
+
+# Allowed request video paths (relative to project root).
+if config.ALLOWED_VIDEO_BASE_DIRS is None:
+    config.ALLOWED_VIDEO_BASE_DIRS = [
+        "videos/",
+        "java-orchestrator/videos/",
+    ]

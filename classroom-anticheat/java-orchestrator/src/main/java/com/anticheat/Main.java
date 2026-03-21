@@ -35,7 +35,9 @@ public class Main {
             }
 
             ExamRequest request = parseArguments(args);
-            runAnalysis(request);
+            int pollIntervalSeconds = parsePollIntervalSeconds(args);
+            int timeoutMinutes = parseTimeoutMinutes(args);
+            runAnalysis(request, pollIntervalSeconds, timeoutMinutes);
 
         } catch (Exception e) {
             reporter.printError(e.getMessage());
@@ -43,8 +45,10 @@ public class Main {
         }
     }
 
-    private static void runAnalysis(ExamRequest request) {
-        AnalysisClient client = new AnalysisClient();
+    private static void runAnalysis(ExamRequest request, int pollIntervalSeconds, int timeoutMinutes) {
+        int pollIntervalMs = Math.max(1, pollIntervalSeconds) * 1000;
+        int maxPollAttempts = Math.max(1, (timeoutMinutes * 60) / Math.max(1, pollIntervalSeconds));
+        AnalysisClient client = new AnalysisClient("http://localhost:8000", pollIntervalMs, maxPollAttempts);
 
         reporter.printStatus("Checking Python CV service availability...");
 
@@ -96,6 +100,12 @@ public class Main {
                 case "--render-annotated-video":
                     renderAnnotated = true;
                     break;
+                case "--poll-interval":
+                    i += 1; // parsed separately
+                    break;
+                case "--timeout":
+                    i += 1; // parsed separately
+                    break;
                 case "--help":
                 case "-h":
                     printUsage();
@@ -119,6 +129,26 @@ public class Main {
         return builder.build();
     }
 
+    private static int parsePollIntervalSeconds(String[] args) {
+        int pollIntervalSeconds = 3;
+        for (int i = 0; i < args.length; i++) {
+            if ("--poll-interval".equals(args[i]) && i + 1 < args.length) {
+                pollIntervalSeconds = Integer.parseInt(args[i + 1]);
+            }
+        }
+        return pollIntervalSeconds;
+    }
+
+    private static int parseTimeoutMinutes(String[] args) {
+        int timeoutMinutes = 120;
+        for (int i = 0; i < args.length; i++) {
+            if ("--timeout".equals(args[i]) && i + 1 < args.length) {
+                timeoutMinutes = Integer.parseInt(args[i + 1]);
+            }
+        }
+        return timeoutMinutes;
+    }
+
     private static void printUsage() {
         System.out.println();
         System.out.println("Classroom Anti-Cheat Analysis System");
@@ -132,6 +162,8 @@ public class Main {
         System.out.println("  --exam-id <id>      Unique identifier for the exam (required)");
         System.out.println("  --video <path>      Path to the CCTV video file (required)");
         System.out.println("  --fps <number>      Frame sampling rate (default: 5)");
+        System.out.println("  --poll-interval <seconds>  Status polling interval (default: 3)");
+        System.out.println("  --timeout <minutes> Max wait time before aborting (default: 120)");
         System.out.println("  --render-annotated-video  Enable Phase 3 annotated video rendering");
         System.out.println("  --help, -h          Show this help message");
         System.out.println();

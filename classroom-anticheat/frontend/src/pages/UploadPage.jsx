@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import PageContainer from '../components/PageContainer';
 import TopBar from '../components/TopBar';
 import GlassCard from '../components/GlassCard';
@@ -8,6 +8,7 @@ import {
   formatPercent,
   formatSeconds,
   normalizeSignal,
+  normalizeResult,
   parseBackendPayload,
   resolveVideoPath,
   signalPillTone,
@@ -21,6 +22,12 @@ export default function UploadPage() {
   const [status, setStatus] = useState('idle'); // idle | processing | results | error
   const [error, setError] = useState('');
   const [result, setResult] = useState(EMPTY_RESULT);
+  const [jobId, setJobId] = useState('');
+  const [jobStatusMessage, setJobStatusMessage] = useState('Queued...');
+  const [jobProgress, setJobProgress] = useState(0);
+
+  const pollingTimeoutRef = useRef(null);
+  const pollingTickRef = useRef(null);
 
   const flaggedTracks = useMemo(
     () => result.results.filter((track) => track.intervals.length > 0),
@@ -31,6 +38,9 @@ export default function UploadPage() {
     setStatus('idle');
     setError('');
     setResult(EMPTY_RESULT);
+    setJobId('');
+    setJobStatusMessage('Queued...');
+    setJobProgress(0);
   };
 
   const setSelectedFile = (selected) => {
@@ -78,8 +88,15 @@ export default function UploadPage() {
         );
       }
 
-      setResult(parseBackendPayload(payload));
-      setStatus('results');
+      const submittedJobId = payload?.job_id;
+      if (!submittedJobId) {
+        throw new Error('Job submission succeeded but no job_id was returned.');
+      }
+
+      setJobId(submittedJobId);
+      setJobStatusMessage('Queued...');
+      setJobProgress(0);
+      setStatus('processing');
     } catch (e) {
       setStatus('error');
       setError(
@@ -89,6 +106,129 @@ export default function UploadPage() {
       );
     }
   };
+
+  useEffect(() => {
+    if (status !== 'processing' || !jobId) return undefined;
+
+    let cancelled = false;
+
+    const pollStatus = async () => {
+      if (cancelled) return;
+      try {
+        const response = await fetch(`${API_BASE_URL}/status/${jobId}`);
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(payload?.detail || payload?.message || 'Failed to fetch job status.');
+        }
+
+        const nextStatus = String(payload?.status || 'queued').toLowerCase();
+        const nextMessage = payload?.message || 'Processing...';
+        const nextProgress = Number(payload?.progress || 0);
+
+        if (!cancelled) {
+          setJobStatusMessage(nextMessage);
+          setJobProgress(Number.isFinite(nextProgress) ? nextProgress : 0);
+        }
+
+        if (nextStatus === 'failed') {
+          let failureMessage = nextMessage || 'Analysis failed.';
+          try {
+            const failedResultResp = await fetch(`${API_BASE_URL}/result/${jobId}`);
+            const failedPayload = await failedResultResp.json().catch(() => ({}));
+            const apiMessage = failedPayload?.error?.message;
+            const phase1Available = failedPayload?.error?.phase1_artifacts_available;
+            if (apiMessage) {
+              failureMessage = phase1Available
+                ? `${apiMessage} Phase 1 artifacts are available in job_store/${jobId}/.`
+                : apiMessage;
+            }
+          } catch {
+            // fallback to status message
+          }
+          if (!cancelled) {
+            setStatus('error');
+            setError(failureMessage);
+          }
+          return;
+        }
+
+        if (nextStatus === 'completed') {
+          const resultResponse = await fetch(`${API_BASE_URL}/result/${jobId}`);
+          const resultPayload = await resultResponse.json().catch(() => ({}));
+          if (!resultResponse.ok) {
+            throw new Error(resultPayload?.detail || resultPayload?.message || 'Failed to fetch analysis result.');
+          }
+
+          if (resultPayload?.status === 'failed') {
+            const message =
+              resultPayload?.error?.message ||
+              'Analysis failed while preparing the final result payload.';
+            if (!cancelled) {
+              setStatus('error');
+              setError(message);
+            }
+            return;
+          }
+
+          const parsed = parseBackendPayload(resultPayload);
+          const normalizedTracks = normalizeResult(resultPayload);
+          if (!cancelled) {
+            setResult({ ...parsed, results: normalizedTracks });
+            setStatus('results');
+          }
+          return;
+        }
+
+        pollingTickRef.current = setTimeout(pollStatus, 3000);
+      } catch (e) {
+        if (!cancelled) {
+          setStatus('error');
+          setError(e instanceof Error ? e.message : 'Failed while polling job status.');
+        }
+      }
+    };
+
+    pollStatus();
+
+    pollingTimeoutRef.current = setTimeout(() => {
+      if (!cancelled) {
+        setStatus('error');
+        setError('Timed out after 10 minutes waiting for analysis completion.');
+      }
+    }, 600000);
+
+    return () => {
+      cancelled = true;
+      if (pollingTickRef.current) clearTimeout(pollingTickRef.current);
+      if (pollingTimeoutRef.current) clearTimeout(pollingTimeoutRef.current);
+    };
+  }, [jobId, status]);
+
+  useEffect(() => {
+    if (status !== 'results' || !jobId || result.annotated_video_status !== 'rendering') {
+      return undefined;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/result/${jobId}`);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || cancelled) return;
+        const parsed = parseBackendPayload(payload);
+        const normalizedTracks = normalizeResult(payload);
+        if (!cancelled) setResult({ ...parsed, results: normalizedTracks });
+      } catch {
+        // best-effort refresh only
+      }
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [jobId, result.annotated_video_status, status]);
 
   return (
     <PageContainer>
@@ -111,9 +251,12 @@ export default function UploadPage() {
               <p className="mt-2 text-[16px] leading-relaxed text-slate-600">
                 This may take several minutes depending on video length.
               </p>
+              <p className="mt-2 text-sm text-slate-600">Job ID: {jobId}</p>
+              <p className="mt-2 text-sm text-slate-600">{jobStatusMessage}</p>
+              <p className="mt-1 text-sm text-slate-500">Progress: {Math.round((jobProgress || 0) * 100)}%</p>
               <button
                 type="button"
-                onClick={() => setStatus('idle')}
+                onClick={resetStatus}
                 className="mt-8 text-slate-500 underline underline-offset-4 hover:text-slate-700"
               >
                 Cancel
@@ -129,7 +272,11 @@ export default function UploadPage() {
               ) : (
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <div className="rounded-xl border border-indigo-100 bg-gradient-to-b from-indigo-50/70 to-white p-3">
-                    {result.annotated_video_path ? (
+                    {result.annotated_video_status === 'rendering' ? (
+                      <div className="rounded-lg p-8 text-center text-slate-600">
+                        Annotated video still rendering...
+                      </div>
+                    ) : result.annotated_video_path ? (
                       <video
                         controls
                         className="w-full rounded-lg"
@@ -190,6 +337,9 @@ export default function UploadPage() {
               <p className="mt-6 text-sm leading-relaxed text-slate-500">
                 Results are flagged for human review only. This system does not confirm cheating.
               </p>
+              {result?.error?.message && (
+                <p className="mt-2 text-sm leading-relaxed text-red-600">{result.error.message}</p>
+              )}
             </div>
           ) : (
             <>
@@ -251,6 +401,7 @@ export default function UploadPage() {
               {status === 'error' && (
                 <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm leading-relaxed text-red-700">
                   {error || 'Something went wrong. Check that the analysis server is running.'}
+                  {jobId && <div className="mt-2 text-xs text-red-600">Job ID: {jobId}</div>}
                 </div>
               )}
 

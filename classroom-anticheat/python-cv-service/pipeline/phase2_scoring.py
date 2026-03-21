@@ -23,6 +23,11 @@ import numpy as np
 from config import config
 
 
+assert abs(config.HEAD_WEIGHT + config.GAZE_WEIGHT + config.PROXIMITY_WEIGHT - 1.0) < 1e-9, (
+    "Signal weights must sum to 1.0"
+)
+
+
 def _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return float(max(lo, min(hi, x)))
 
@@ -59,7 +64,7 @@ class IntervalAcc:
 
 class Phase2Scoring:
     def __init__(self):
-        self.alpha = float(config.EMA_ALPHA)
+        self.alpha = float(config.EMA_ALPHA_BASE)
         self.enter_th = float(config.SUSPICION_ENTER_THRESHOLD)
         self.exit_th = float(config.SUSPICION_EXIT_THRESHOLD)
 
@@ -67,9 +72,9 @@ class Phase2Scoring:
         self.min_interval_avg_confidence = float(config.MIN_INTERVAL_AVG_CONFIDENCE)
         self.merge_gap_sec = float(config.MERGE_GAP_SEC)
 
-        self.weight_head = float(config.WEIGHT_HEAD)
-        self.weight_gaze = float(config.WEIGHT_GAZE)
-        self.weight_proximity = float(config.WEIGHT_PROXIMITY)
+        self.weight_head = float(config.HEAD_WEIGHT)
+        self.weight_gaze = float(config.GAZE_WEIGHT)
+        self.weight_proximity = float(config.PROXIMITY_WEIGHT)
 
     @staticmethod
     def _load_video_duration_sec(features_jsonl_path: Path) -> float:
@@ -85,6 +90,14 @@ class Phase2Scoring:
         except Exception:
             return 3600.0
 
+    @staticmethod
+    def _load_phase1_stats(features_jsonl_path: Path) -> Dict[str, Any]:
+        phase1_stats_path = features_jsonl_path.parent / "phase1_stats.json"
+        try:
+            return json.loads(phase1_stats_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
     def run(
         self,
         out_results_path: Path,
@@ -95,8 +108,12 @@ class Phase2Scoring:
         out_frame_scores_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
         # Duration-aware scaling for short clips.
-        duration_sec = self._load_video_duration_sec(features_jsonl_path)
+        phase1_stats = self._load_phase1_stats(features_jsonl_path)
+        duration_sec = float(phase1_stats.get("duration_sec", self._load_video_duration_sec(features_jsonl_path)))
+        fps_sampling = int(phase1_stats.get("fps_sampling", config.FPS_SAMPLING))
         duration_ratio = float(np.clip(duration_sec / 3600.0, 0.1, 1.0))
+
+        alpha = float(config.EMA_ALPHA_FAST if fps_sampling >= 10 else config.EMA_ALPHA_BASE)
 
         effective_min_lifespan_sec = max(
             2.0, float(config.MIN_TRACK_LIFESPAN_SEC) * duration_ratio
@@ -111,7 +128,7 @@ class Phase2Scoring:
             1.5, float(config.MIN_INTERVAL_DURATION_SEC) * duration_ratio
         )
         effective_alpha = float(
-            min(0.6, max(0.0, 1.0 - (1.0 - float(config.EMA_ALPHA)) * duration_ratio))
+            min(0.6, max(0.0, 1.0 - (1.0 - alpha) * duration_ratio))
         )
 
         score_ceiling_ratio = float(np.clip(float(config.EFFECTIVE_SCORE_CEILING) / 1.0, 0.0, 1.0))
@@ -125,6 +142,7 @@ class Phase2Scoring:
             f"effective_baseline_window={effective_baseline_window_sec:.2f}s, "
             f"effective_min_baseline_samples={effective_min_baseline_samples}, "
             f"effective_min_interval_duration={effective_min_interval_duration_sec:.2f}s, "
+            f"fps_sampling={fps_sampling}, alpha={alpha:.3f}, "
             f"effective_alpha={effective_alpha:.3f}, "
             f"raw_enter_th={self.enter_th:.3f}, raw_exit_th={self.exit_th:.3f}, "
             f"adjusted_enter_th={adjusted_enter_th:.3f}, adjusted_exit_th={adjusted_exit_th:.3f}"
@@ -182,8 +200,9 @@ class Phase2Scoring:
             ys = np.array([p[1] for p in pts], dtype=np.float64)
             spatial_var = float(np.var(xs) + np.var(ys))
             if (
-                travel >= float(config.TEACHER_CUMULATIVE_TRAVEL_THRESHOLD)
-                and spatial_var >= float(config.TEACHER_SPATIAL_VARIANCE_THRESHOLD)
+                float(track_meta.get(tid, {}).get("total_visible_duration_sec", 0.0)) >= float(config.TEACHER_MIN_TRACK_AGE_SEC)
+                and travel >= float(config.TEACHER_MIN_CUMULATIVE_TRAVEL_PX)
+                and spatial_var >= float(config.TEACHER_MIN_SPATIAL_VARIANCE)
             ):
                 teacher_candidates.append((tid, travel, spatial_var))
 
@@ -375,8 +394,9 @@ class Phase2Scoring:
             frame_scores_fp = out_frame_scores_path.open("w", encoding="utf-8")
 
         try:
-            sim_signal_th = float(config.SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD)
-            sim_min_tracks = int(config.SIMULTANEOUS_EVENT_MIN_TRACKS)
+            sim_signal_th = float(config.SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD)
+            sim_min_tracks = int(config.SIMULTANEOUS_SUPPRESSION_MIN_TRACKS)
+            sim_fraction = float(config.SIMULTANEOUS_SUPPRESSION_FRACTION)
             teacher_radius = float(config.TEACHER_PROXIMITY_SUPPRESSION_RADIUS)
 
             for timestamp in sorted(records_by_ts.keys()):
@@ -475,6 +495,7 @@ class Phase2Scoring:
                                 + self.weight_gaze * gaze_signal
                                 + self.weight_proximity * proximity_signal
                             )
+                            raw_signal_score = _clamp(raw_signal_score, 0.0, 1.0)
 
                             occlusion_clarity = float(1.0 - occlusion_score)
                             confidence_weight_mean = (
@@ -523,10 +544,15 @@ class Phase2Scoring:
                     )
 
                 # Whole-class simultaneous event suppression.
-                simultaneous_count = sum(
+                active_track_count = len(frame_items)
+                flagged_count = sum(
                     1 for item in frame_items if float(item["raw_signal_score"]) > sim_signal_th
                 )
-                whole_class_event = simultaneous_count >= sim_min_tracks
+                whole_class_event = (
+                    active_track_count >= sim_min_tracks
+                    and active_track_count > 0
+                    and (float(flagged_count) / float(active_track_count)) >= sim_fraction
+                )
                 if whole_class_event:
                     for item in frame_items:
                         item["suppressed_whole_class_event"] = True

@@ -1,10 +1,27 @@
 """
 YOLOv8-based person detection.
 """
+from pathlib import Path
 from ultralytics import YOLO
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from dataclasses import dataclass
+
+
+def _resolve_model_path(filename: str) -> str:
+    candidates = [
+        Path(__file__).parent / filename,
+        Path(__file__).parent.parent / filename,
+        Path(__file__).parent.parent.parent / filename,
+        Path(filename),
+    ]
+    for p in candidates:
+        if p.exists():
+            return str(p)
+    raise FileNotFoundError(
+        f"Model file '{filename}' not found. Place it in python-cv-service/ "
+        f"or set an absolute path. Searched: {[str(c) for c in candidates]}"
+    )
 
 
 @dataclass
@@ -34,9 +51,10 @@ class PersonDetector:
             model_name: YOLOv8 model variant
             confidence: Minimum confidence threshold
         """
-        self.model = YOLO(model_name)
+        model_path = _resolve_model_path(model_name)
+        self.model = YOLO(model_path)
         self.confidence = confidence
-        print(f"[Detector] Loaded {model_name} with confidence threshold {confidence}")
+        print(f"[Detector] Loaded {model_path} with confidence threshold {confidence}")
     
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
