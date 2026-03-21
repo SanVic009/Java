@@ -19,9 +19,10 @@ class Config:
     PROXIMITY_RATIO: float = 0.7
     
     # Signal weights (must sum to 1.0)
-    HEAD_WEIGHT: float = 0.35
-    GAZE_WEIGHT: float = 0.22
-    PROXIMITY_WEIGHT: float = 0.43
+    HEAD_WEIGHT: float = 0.33
+    GAZE_WEIGHT: float = 0.20
+    PROXIMITY_WEIGHT: float = 0.32
+    DRIFT_WEIGHT: float = 0.15
 
     # Backward-compatible aliases
     WEIGHT_HEAD: float = HEAD_WEIGHT
@@ -44,7 +45,7 @@ class Config:
     # Detection confidence
     YOLO_CONFIDENCE: float = 0.5
     MIN_DETECTION_CONFIDENCE: float = 0.60
-    NMS_IOU_THRESHOLD: float = 0.30
+    NMS_IOU_THRESHOLD: float = 0.45
     MIN_PERSON_BOX_AREA: float = 2500.0
     MIN_PERSON_ASPECT_RATIO: float = 1.1
     MAX_PERSON_ASPECT_RATIO: float = 4.5
@@ -65,11 +66,15 @@ class Config:
 
     # Rolling baseline (track-specific, uncertainty-aware)
     BASELINE_ROLLING_WINDOW_SEC: float = 30.0
+    BASELINE_LOCK_SEC: float = 60.0
+    BASELINE_UPDATE_DURING_SUSPICION: bool = False
     MIN_BASELINE_SAMPLES: int = 5  # number of accepted samples per rolling baseline
 
     # Signal normalization / thresholds for continuous scoring
     HEAD_DEV_NORM_DEG: float = 25.0
     GAZE_DEV_NORM: float = 0.4
+    SIGNAL_FLAG_THRESHOLD: float = 0.6
+    GAZE_X_SCALE_FACTOR: float = 2.0
     PROXIMITY_DISTANCE_RATIO_THRESHOLD: float = 0.7  # current_dist < baseline_dist * ratio triggers proximity anomaly
 
     # Temporal aggregation (robust hysteresis + smoothing)

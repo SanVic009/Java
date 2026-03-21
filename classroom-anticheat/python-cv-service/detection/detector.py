@@ -7,6 +7,8 @@ import numpy as np
 from typing import List, Tuple
 from dataclasses import dataclass
 
+from config import config
+
 
 def _resolve_model_path(filename: str) -> str:
     candidates = [
@@ -54,7 +56,26 @@ class PersonDetector:
         model_path = _resolve_model_path(model_name)
         self.model = YOLO(model_path)
         self.confidence = confidence
+        self.nms_iou_threshold = float(getattr(config, "NMS_IOU_THRESHOLD", 0.45))
         print(f"[Detector] Loaded {model_path} with confidence threshold {confidence}")
+
+    def _filter_detections(self, detections: List[Detection]) -> List[Detection]:
+        filtered: List[Detection] = []
+        for det in detections:
+            x1, y1, x2, y2 = det.bbox
+            w = x2 - x1
+            h = y2 - y1
+            area = w * h
+            aspect = h / max(w, 1)
+
+            if area < float(config.MIN_PERSON_BOX_AREA):
+                continue
+            if aspect < float(config.MIN_PERSON_ASPECT_RATIO):
+                continue
+            if aspect > float(config.MAX_PERSON_ASPECT_RATIO):
+                continue
+            filtered.append(det)
+        return filtered
     
     def detect(self, frame: np.ndarray) -> List[Detection]:
         """
@@ -66,7 +87,12 @@ class PersonDetector:
         Returns:
             List of Detection objects
         """
-        results = self.model(frame, verbose=False, conf=self.confidence)
+        results = self.model(
+            frame,
+            verbose=False,
+            conf=self.confidence,
+            iou=self.nms_iou_threshold,
+        )
         
         detections = []
         for result in results:
@@ -78,7 +104,7 @@ class PersonDetector:
                     conf = float(boxes.conf[i])
                     detections.append(Detection.from_xyxy(xyxy, conf))
         
-        return detections
+        return self._filter_detections(detections)
     
     def detect_batch(self, frames: List[np.ndarray]) -> List[List[Detection]]:
         """

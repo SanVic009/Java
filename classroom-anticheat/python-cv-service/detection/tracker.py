@@ -81,8 +81,8 @@ class ByteTracker:
     def __init__(
         self,
         track_thresh: float = 0.5,
-        track_buffer: int = 30,
-        match_thresh: float = 0.8,
+        track_buffer: int = 10,
+        match_thresh: float = 0.35,
         fps_sampling: float = 5.0,
         id_switch_distance_px: float = 60.0,
         id_switch_lookback_sec: float = 15.0
@@ -220,7 +220,18 @@ class ByteTracker:
         frame_idx = self._frame_idx
 
         for row, col in zip(row_indices, col_indices):
-            if iou_matrix[row, col] >= self.match_thresh:
+            iou_ok = iou_matrix[row, col] >= self.match_thresh
+            if not iou_ok:
+                cx1, cy1 = tracks[row].centroid
+                cx2, cy2 = detections[col].centroid[0], detections[col].centroid[1]
+                dist = float(np.sqrt((cx1 - cx2) ** 2 + (cy1 - cy2) ** 2))
+                x1, y1, x2, y2 = tracks[row].bbox
+                diag = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
+                centroid_ok = dist <= (diag * 0.15)
+            else:
+                centroid_ok = False
+
+            if iou_ok or centroid_ok:
                 tracks[row].update(detections[col].bbox, detections[col].confidence, frame_idx)
                 matched_tracks.add(row)
                 matched_dets.add(col)

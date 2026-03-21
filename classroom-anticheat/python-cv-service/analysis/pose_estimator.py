@@ -609,6 +609,11 @@ class PoseEstimator:
             # Get right iris center
             right_iris_x = np.mean([landmarks.landmark[i].x for i in self.RIGHT_IRIS])
             right_iris_y = np.mean([landmarks.landmark[i].y for i in self.RIGHT_IRIS])
+
+            # Tiny eye width means the face is too small for reliable iris tracking.
+            MIN_EYE_WIDTH_NORMALIZED = 0.04
+            if left_eye_width < MIN_EYE_WIDTH_NORMALIZED or right_eye_width < MIN_EYE_WIDTH_NORMALIZED:
+                return 0.0, 0.0, 0.0
             
             # Calculate gaze offset (normalized by eye width)
             left_gaze_x = (left_iris_x - left_eye_center_x) / (left_eye_width + 1e-6)
@@ -623,12 +628,16 @@ class PoseEstimator:
             gaze_y = iris_center_y - eye_center_y
             
             # Clamp to reasonable range
-            gaze_x = max(-1.0, min(1.0, gaze_x * 3))  # Scale up for sensitivity
+            gaze_x = max(
+                -1.0,
+                min(1.0, gaze_x * float(getattr(config, "GAZE_X_SCALE_FACTOR", 2.0))),
+            )
             gaze_y = max(-1.0, min(1.0, gaze_y * 10))
 
             # Gaze reliability: left/right agreement + basic iris geometry sanity.
             agreement = 1.0 - (abs(left_gaze_x - right_gaze_x) / 2.0)
-            iris_present = 1.0 - (abs(left_iris_y - right_iris_y) / (height + 1e-6))
+            iris_vertical_diff = abs(left_iris_y - right_iris_y)
+            iris_present = float(np.clip(1.0 - (iris_vertical_diff / 0.05), 0.0, 1.0))
             gaze_reliability = float(
                 np.clip(0.5 * agreement + 0.5 * iris_present, 0.0, 1.0)
             )

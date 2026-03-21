@@ -23,7 +23,9 @@ import numpy as np
 from config import config
 
 
-assert abs(config.HEAD_WEIGHT + config.GAZE_WEIGHT + config.PROXIMITY_WEIGHT - 1.0) < 1e-9, (
+assert abs(
+    config.HEAD_WEIGHT + config.GAZE_WEIGHT + config.PROXIMITY_WEIGHT + config.DRIFT_WEIGHT - 1.0
+) < 1e-9, (
     "Signal weights must sum to 1.0"
 )
 
@@ -52,6 +54,7 @@ class IntervalAcc:
     head_signal_sum: float = 0.0
     gaze_signal_sum: float = 0.0
     proximity_signal_sum: float = 0.0
+    drift_signal_sum: float = 0.0
     component_sum_frames: int = 0
 
     head_deviation_flag_count: int = 0
@@ -75,6 +78,7 @@ class Phase2Scoring:
         self.weight_head = float(config.HEAD_WEIGHT)
         self.weight_gaze = float(config.GAZE_WEIGHT)
         self.weight_proximity = float(config.PROXIMITY_WEIGHT)
+        self.weight_drift = float(config.DRIFT_WEIGHT)
 
     @staticmethod
     def _load_video_duration_sec(features_jsonl_path: Path) -> float:
@@ -127,6 +131,9 @@ class Phase2Scoring:
         effective_min_interval_duration_sec = max(
             1.5, float(config.MIN_INTERVAL_DURATION_SEC) * duration_ratio
         )
+        effective_baseline_lock_sec = max(
+            3.0, float(config.BASELINE_LOCK_SEC) * duration_ratio
+        )
         effective_alpha = float(
             min(0.6, max(0.0, 1.0 - (1.0 - alpha) * duration_ratio))
         )
@@ -142,6 +149,7 @@ class Phase2Scoring:
             f"effective_baseline_window={effective_baseline_window_sec:.2f}s, "
             f"effective_min_baseline_samples={effective_min_baseline_samples}, "
             f"effective_min_interval_duration={effective_min_interval_duration_sec:.2f}s, "
+            f"effective_baseline_lock={effective_baseline_lock_sec:.2f}s, "
             f"fps_sampling={fps_sampling}, alpha={alpha:.3f}, "
             f"effective_alpha={effective_alpha:.3f}, "
             f"raw_enter_th={self.enter_th:.3f}, raw_exit_th={self.exit_th:.3f}, "
@@ -246,6 +254,7 @@ class Phase2Scoring:
 
         # Rolling baseline per track (timestamp, value)
         window_sec = float(effective_baseline_window_sec)
+        long_window_sec = 300.0
         min_samples = int(effective_min_baseline_samples)
 
         @dataclass
@@ -254,6 +263,8 @@ class Phase2Scoring:
             baseline_yaw: Deque[Tuple[float, float]] = None
             baseline_gaze: Deque[Tuple[float, float]] = None
             baseline_dist: Deque[Tuple[float, float]] = None
+            baseline_yaw_long: Deque[Tuple[float, float]] = None
+            baseline_gaze_long: Deque[Tuple[float, float]] = None
             interval_open: bool = False
             interval: Optional[IntervalAcc] = None
 
@@ -266,6 +277,8 @@ class Phase2Scoring:
                     baseline_yaw=deque(),
                     baseline_gaze=deque(),
                     baseline_dist=deque(),
+                    baseline_yaw_long=deque(),
+                    baseline_gaze_long=deque(),
                     interval_open=False,
                     interval=None,
                 )
@@ -285,6 +298,13 @@ class Phase2Scoring:
             gaze_med = _median(gaze_vals) if len(gaze_vals) >= min_samples else None
             dist_med = _median(dist_vals) if len(dist_vals) >= min_samples else None
             return yaw_med, gaze_med, dist_med
+
+        def _long_baseline_values(state: TrackState) -> Tuple[Optional[float], Optional[float]]:
+            yaw_vals = deque([v for _, v in state.baseline_yaw_long])
+            gaze_vals = deque([v for _, v in state.baseline_gaze_long])
+            yaw_med = _median(yaw_vals) if len(yaw_vals) >= min_samples else None
+            gaze_med = _median(gaze_vals) if len(gaze_vals) >= min_samples else None
+            return yaw_med, gaze_med
 
         results_by_track: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
 
@@ -330,14 +350,16 @@ class Phase2Scoring:
                 head_avg = interval.head_signal_sum / float(interval.component_sum_frames)
                 gaze_avg = interval.gaze_signal_sum / float(interval.component_sum_frames)
                 prox_avg = interval.proximity_signal_sum / float(interval.component_sum_frames)
+                drift_avg = interval.drift_signal_sum / float(interval.component_sum_frames)
             else:
-                head_avg = gaze_avg = prox_avg = 0.0
+                head_avg = gaze_avg = prox_avg = drift_avg = 0.0
 
             comp_sorted = sorted(
                 [
                     ("HeadDeviation", head_avg),
                     ("GazeDeviation", gaze_avg),
                     ("ProximityAnomaly", prox_avg),
+                    ("SustainedDrift", drift_avg),
                 ],
                 key=lambda x: x[1],
                 reverse=True,
@@ -377,6 +399,7 @@ class Phase2Scoring:
                     "head": interval.head_signal_sum,
                     "gaze": interval.gaze_signal_sum,
                     "prox": interval.proximity_signal_sum,
+                    "drift": interval.drift_signal_sum,
                 },
                 "_support": {
                     "head_dev_count": interval.head_deviation_flag_count,
@@ -398,6 +421,7 @@ class Phase2Scoring:
             sim_min_tracks = int(config.SIMULTANEOUS_SUPPRESSION_MIN_TRACKS)
             sim_fraction = float(config.SIMULTANEOUS_SUPPRESSION_FRACTION)
             teacher_radius = float(config.TEACHER_PROXIMITY_SUPPRESSION_RADIUS)
+            ema_baseline_freeze_threshold = float(config.SUSPICION_ENTER_THRESHOLD) * 0.6
 
             for timestamp in sorted(records_by_ts.keys()):
                 frame_items: List[Dict[str, Any]] = []
@@ -426,6 +450,7 @@ class Phase2Scoring:
                     head_signal = 0.0
                     gaze_signal = 0.0
                     proximity_signal = 0.0
+                    drift_signal = 0.0
                     head_dev_flag = 0
                     gaze_dev_flag = 0
 
@@ -451,17 +476,29 @@ class Phase2Scoring:
                     if not baseline_ok:
                         stats["frames_low_visibility"] += 1
                     else:
-                        state.baseline_yaw.append((timestamp, float(pose["yaw"])))
-                        state.baseline_gaze.append((timestamp, float(pose["gaze_x"])))
-                        if nearest_distance is not None:
-                            state.baseline_dist.append((timestamp, nearest_distance))
+                        baseline_calibration_ok = bool(config.BASELINE_UPDATE_DURING_SUSPICION) or (
+                            float(timestamp) <= float(effective_baseline_lock_sec)
+                            or float(state.ema) < float(ema_baseline_freeze_threshold)
+                        )
+                        if baseline_calibration_ok:
+                            state.baseline_yaw.append((timestamp, float(pose["yaw"])))
+                            state.baseline_gaze.append((timestamp, float(pose["gaze_x"])))
+                            state.baseline_yaw_long.append((timestamp, float(pose["yaw"])))
+                            state.baseline_gaze_long.append((timestamp, float(pose["gaze_x"])))
+                            if nearest_distance is not None:
+                                state.baseline_dist.append((timestamp, nearest_distance))
 
                     # Prune rolling baselines.
                     _prune(state.baseline_yaw, timestamp)
                     _prune(state.baseline_gaze, timestamp)
                     _prune(state.baseline_dist, timestamp)
+                    while state.baseline_yaw_long and (timestamp - state.baseline_yaw_long[0][0]) > long_window_sec:
+                        state.baseline_yaw_long.popleft()
+                    while state.baseline_gaze_long and (timestamp - state.baseline_gaze_long[0][0]) > long_window_sec:
+                        state.baseline_gaze_long.popleft()
 
                     baseline_yaw, baseline_gaze, baseline_dist = _baseline_values(state)
+                    baseline_yaw_long, _ = _long_baseline_values(state)
                     baseline_ready = baseline_yaw is not None and baseline_gaze is not None
 
                     # 2) Compute signals and confidence-weighted score when possible.
@@ -490,12 +527,25 @@ class Phase2Scoring:
                                 if threshold > 1e-6 and nearest_distance <= threshold:
                                     proximity_signal = _clamp((threshold - nearest_distance) / threshold, 0.0, 1.0)
 
+                            if baseline_yaw is not None and baseline_yaw_long is not None:
+                                drift_signal = _clamp(
+                                    abs(float(baseline_yaw) - float(baseline_yaw_long))
+                                    / float(config.HEAD_DEV_NORM_DEG),
+                                    0.0,
+                                    1.0,
+                                )
+
                             raw_signal_score = (
                                 self.weight_head * head_signal
                                 + self.weight_gaze * gaze_signal
                                 + self.weight_proximity * proximity_signal
+                                + self.weight_drift * drift_signal
                             )
                             raw_signal_score = _clamp(raw_signal_score, 0.0, 1.0)
+
+                            estimation_mode = rec.get("estimation_mode")
+                            if estimation_mode == "bbox_proxy_face_not_visible":
+                                raw_signal_score = _clamp(raw_signal_score * 0.5, 0.0, 1.0)
 
                             occlusion_clarity = float(1.0 - occlusion_score)
                             confidence_weight_mean = (
@@ -509,10 +559,21 @@ class Phase2Scoring:
                                 0.0,
                                 1.0,
                             )
+
+                            active_signals = sum(
+                                [
+                                    1 if head_signal >= 0.5 else 0,
+                                    1 if gaze_signal >= 0.5 else 0,
+                                    1 if proximity_signal >= 0.5 else 0,
+                                ]
+                            )
+                            if active_signals >= 2:
+                                confidence_weight = _clamp(confidence_weight * 1.15, 0.0, 1.0)
+
                             final_score_pre = raw_signal_score * confidence_weight
 
-                            head_dev_flag = 1 if head_signal >= 1.0 else 0
-                            gaze_dev_flag = 1 if gaze_signal >= 1.0 else 0
+                            head_dev_flag = 1 if head_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
+                            gaze_dev_flag = 1 if gaze_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
                     else:
                         stats["frames_baseline_not_ready"] += 1
 
@@ -529,17 +590,20 @@ class Phase2Scoring:
                             "baseline_ready": bool(baseline_ready),
                             "visibility_score": float(visibility_score),
                             "occlusion_score": float(occlusion_score),
+                            "gaze_reliability": float(gaze_reliability),
                             "raw_signal_score": float(raw_signal_score),
                             "confidence_weight": float(confidence_weight),
                             "final_score_pre": float(final_score_pre),
                             "head_signal": float(head_signal),
                             "gaze_signal": float(gaze_signal),
                             "proximity_signal": float(proximity_signal),
+                            "drift_signal": float(drift_signal),
                             "head_dev_flag": int(head_dev_flag),
                             "gaze_dev_flag": int(gaze_dev_flag),
                             "centroid": centroid,
                             "suppressed_whole_class_event": False,
                             "suppressed_teacher_proximity": False,
+                            "estimation_mode": rec.get("estimation_mode"),
                         }
                     )
 
@@ -592,9 +656,12 @@ class Phase2Scoring:
                                     "head_signal": float(item["head_signal"]),
                                     "gaze_signal": float(item["gaze_signal"]),
                                     "proximity_signal": float(item["proximity_signal"]),
+                                    "drift_signal": float(item["drift_signal"]),
                                     "baseline_ready": bool(item["baseline_ready"]),
                                     "visibility_score": float(item["visibility_score"]),
                                     "occlusion_score": float(item["occlusion_score"]),
+                                    "gaze_reliability": float(item["gaze_reliability"]),
+                                    "estimation_mode": item.get("estimation_mode"),
                                     "suppressed_whole_class_event": bool(item["suppressed_whole_class_event"]),
                                     "suppressed_teacher_proximity": bool(item["suppressed_teacher_proximity"]),
                                 }
@@ -619,6 +686,7 @@ class Phase2Scoring:
                                 interval.head_signal_sum += float(item["head_signal"])
                                 interval.gaze_signal_sum += float(item["gaze_signal"])
                                 interval.proximity_signal_sum += float(item["proximity_signal"])
+                                interval.drift_signal_sum += float(item["drift_signal"])
                                 interval.component_sum_frames += 1
 
                                 interval.head_deviation_flag_count += int(item["head_dev_flag"])
@@ -651,6 +719,7 @@ class Phase2Scoring:
                                 interval.head_signal_sum = float(item["head_signal"])
                                 interval.gaze_signal_sum = float(item["gaze_signal"])
                                 interval.proximity_signal_sum = float(item["proximity_signal"])
+                                interval.drift_signal_sum = float(item["drift_signal"])
                                 interval.component_sum_frames = 1
                                 interval.head_deviation_flag_count = int(item["head_dev_flag"])
                                 interval.gaze_deviation_flag_count = int(item["gaze_dev_flag"])
@@ -717,6 +786,7 @@ class Phase2Scoring:
                         "head": float(a["_component_sums"]["head"] + b["_component_sums"]["head"]),
                         "gaze": float(a["_component_sums"]["gaze"] + b["_component_sums"]["gaze"]),
                         "prox": float(a["_component_sums"]["prox"] + b["_component_sums"]["prox"]),
+                        "drift": float(a["_component_sums"]["drift"] + b["_component_sums"]["drift"]),
                     },
                     "_support": {
                         "head_dev_count": int(a["_support"]["head_dev_count"] + b["_support"]["head_dev_count"]),

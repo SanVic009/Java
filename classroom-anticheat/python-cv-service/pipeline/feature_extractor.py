@@ -243,6 +243,11 @@ class FeatureExtractorPhase1:
                                 "timestamp": timestamp,
                                 "frame_sample_idx": int(sample_idx),
                                 "track_id": track_id,
+                                "estimation_mode": (
+                                    pose_payload.get("estimation_mode")
+                                    if pose_payload is not None
+                                    else None
+                                ),
 
                                 "bbox": list(track.bbox),
                                 "detection": {
