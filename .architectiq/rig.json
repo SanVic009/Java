@@ -207,6 +207,7 @@
         "exports": [
           "API_BASE_URL",
           "EMPTY_RESULT",
+          "normalizeResult",
           "normalizeSignal",
           "signalPillTone",
           "formatSeconds",
@@ -216,6 +217,7 @@
         ],
         "classes": [],
         "functions": [
+          "normalizeResult",
           "normalizeSignal",
           "signalPillTone",
           "formatSeconds",
@@ -226,7 +228,7 @@
         "isEntry": false,
         "path": "classroom-anticheat/frontend/src/lib/analysisUtils.js",
         "external": false,
-        "contentPreview": "export const API_BASE_URL = 'http://localhost:8000';\n\nexport const EMPTY_RESULT = {\n  exam_id: '',\n  results: [],\n  annotated_video_path: '',\n};\n\nexport function normalizeSignal(raw) {\n  const value = String(raw || '').replace(/[_\\s]+/g, '').toLowerCase();\n  if (value === 'headdeviation') return 'HeadDeviation';\n  if (value === 'gazedeviation') return 'GazeDeviation';\n  if (value === 'proximityanomaly') return 'ProximityAnomaly';\n  return raw || 'UnknownSignal';\n}\n\nexport function signalPillTone(signal) {\n  if (signal === 'HeadDeviation') return 'bg-indigo-100 text-indigo-700 border-indigo-300';\n  if (signal === 'GazeDeviation') return 'bg-violet-100 text-violet-700 border-violet-300';\n  if (signal === 'ProximityAnomaly') return 'bg-teal-100 text-teal-700 border-teal-300';\n  return 'bg-slate-100 text-slate-700 border-slate-300';\n}\n\nexport function formatSeconds(value) {\n  return `${(Number(value) || 0).toFixed(2)}s`;\n}\n\nexport function formatPercent(value) {\n  return `${Math.round((Number(value) || 0) * 100)}%`;\n}\n\nexport function resolveVideoPath(path) {\n  if (!path) return '';\n  if (/^https?:\\/\\//i.test(path)) return path;\n  if (path.startsWith('/')) return `${API_BASE_URL}${path}`;\n  return `${API_BASE_URL}/${path}`;\n}\n\nexport function parseBackendPayload(payload) {\n  const root = payload?.result ?? payload ?? {};\n  const tracks = Array.isArray(root.results)\n    ? root.results\n    : Array.isArray(root.tracks)\n      ? root.tracks\n      : [];\n\n  return {\n    exam_id: root.ex"
+        "contentPreview": "export const API_BASE_URL = 'http://localhost:8000';\n\nexport const EMPTY_RESULT = {\n  exam_id: '',\n  results: [],\n  annotated_video_path: '',\n  annotated_video_status: 'not_requested',\n};\n\nexport function normalizeResult(resultPayload) {\n  const root = resultPayload?.result ?? resultPayload ?? {};\n  return Array.isArray(root?.result?.results)\n    ? root.result.results\n    : Array.isArray(root?.results)\n      ? root.results\n      : [];\n}\n\nexport function normalizeSignal(raw) {\n  const value = String(raw || '').replace(/[_\\s]+/g, '').toLowerCase();\n  if (value === 'headdeviation') return 'HeadDeviation';\n  if (value === 'gazedeviation') return 'GazeDeviation';\n  if (value === 'proximityanomaly') return 'ProximityAnomaly';\n  return raw || 'UnknownSignal';\n}\n\nexport function signalPillTone(signal) {\n  if (signal === 'HeadDeviation') return 'bg-indigo-100 text-indigo-700 border-indigo-300';\n  if (signal === 'GazeDeviation') return 'bg-violet-100 text-violet-700 border-violet-300';\n  if (signal === 'ProximityAnomaly') return 'bg-teal-100 text-teal-700 border-teal-300';\n  return 'bg-slate-100 text-slate-700 border-slate-300';\n}\n\nexport function formatSeconds(value) {\n  return `${(Number(value) || 0).toFixed(2)}s`;\n}\n\nexport function formatPercent(value) {\n  return `${Math.round((Number(value) || 0) * 100)}%`;\n}\n\nexport function resolveVideoPath(path) {\n  if (!path) return '';\n  if (/^https?:\\/\\//i.test(path)) return path;\n  if (path.startsWith('/')) return `${API_BASE_URL}${path}`;\n"
       },
       "evidence": [
         "classroom-anticheat/frontend/src/lib/analysisUtils.js"
@@ -287,7 +289,7 @@
         "isEntry": false,
         "path": "classroom-anticheat/frontend/src/pages/UploadPage.jsx",
         "external": false,
-        "contentPreview": "import { useMemo, useState } from 'react';\nimport PageContainer from '../components/PageContainer';\nimport TopBar from '../components/TopBar';\nimport GlassCard from '../components/GlassCard';\nimport {\n  API_BASE_URL,\n  EMPTY_RESULT,\n  formatPercent,\n  formatSeconds,\n  normalizeSignal,\n  parseBackendPayload,\n  resolveVideoPath,\n  signalPillTone,\n} from '../lib/analysisUtils';\n\nexport default function UploadPage() {\n  const [dragOver, setDragOver] = useState(false);\n  const [file, setFile] = useState(null);\n  const [examId, setExamId] = useState('');\n  const [renderAnnotatedVideo, setRenderAnnotatedVideo] = useState(true);\n  const [status, setStatus] = useState('idle'); // idle | processing | results | error\n  const [error, setError] = useState('');\n  const [result, setResult] = useState(EMPTY_RESULT);\n\n  const flaggedTracks = useMemo(\n    () => result.results.filter((track) => track.intervals.length > 0),\n    [result.results],\n  );\n\n  const resetStatus = () => {\n    setStatus('idle');\n    setError('');\n    setResult(EMPTY_RESULT);\n  };\n\n  const setSelectedFile = (selected) => {\n    if (!selected) return;\n    setFile(selected);\n    resetStatus();\n  };\n\n  const handleDrop = (event) => {\n    event.preventDefault();\n    setDragOver(false);\n    setSelectedFile(event.dataTransfer.files?.[0]);\n  };\n\n  const runAnalysis = async () => {\n    if (!file) return;\n\n    if (!examId.trim()) {\n      setStatus('error');\n      setError('Please provide an Exam ID before running analysis.');\n     "
+        "contentPreview": "import { useEffect, useMemo, useRef, useState } from 'react';\nimport PageContainer from '../components/PageContainer';\nimport TopBar from '../components/TopBar';\nimport GlassCard from '../components/GlassCard';\nimport {\n  API_BASE_URL,\n  EMPTY_RESULT,\n  formatPercent,\n  formatSeconds,\n  normalizeSignal,\n  normalizeResult,\n  parseBackendPayload,\n  resolveVideoPath,\n  signalPillTone,\n} from '../lib/analysisUtils';\n\nexport default function UploadPage() {\n  const [dragOver, setDragOver] = useState(false);\n  const [file, setFile] = useState(null);\n  const [examId, setExamId] = useState('');\n  const [renderAnnotatedVideo, setRenderAnnotatedVideo] = useState(true);\n  const [status, setStatus] = useState('idle'); // idle | processing | results | error\n  const [error, setError] = useState('');\n  const [result, setResult] = useState(EMPTY_RESULT);\n  const [jobId, setJobId] = useState('');\n  const [jobStatusMessage, setJobStatusMessage] = useState('Queued...');\n  const [jobProgress, setJobProgress] = useState(0);\n\n  const pollingTimeoutRef = useRef(null);\n  const pollingTickRef = useRef(null);\n\n  const flaggedTracks = useMemo(\n    () => result.results.filter((track) => track.intervals.length > 0),\n    [result.results],\n  );\n\n  const resetStatus = () => {\n    setStatus('idle');\n    setError('');\n    setResult(EMPTY_RESULT);\n    setJobId('');\n    setJobStatusMessage('Queued...');\n    setJobProgress(0);\n  };\n\n  const setSelectedFile = (selected) => {\n    if (!selected) return;\n    setFile("
       },
       "evidence": [
         "classroom-anticheat/frontend/src/pages/UploadPage.jsx"
@@ -1040,109 +1042,6 @@
     },
     {
       "kind": "module",
-      "name": "classroom-anticheat/python-cv-service/analysis/aggregator.py",
-      "properties": {
-        "role": "service",
-        "language": "python",
-        "exports": [
-          "SuspiciousInterval",
-          "TemporalAggregator"
-        ],
-        "classes": [
-          "SuspiciousInterval",
-          "TemporalAggregator"
-        ],
-        "functions": [
-          "__init__",
-          "add_score",
-          "aggregate",
-          "_find_suspicious_windows",
-          "_merge_windows",
-          "reset"
-        ],
-        "isEntry": false,
-        "path": "classroom-anticheat/python-cv-service/analysis/aggregator.py",
-        "external": false,
-        "contentPreview": "\"\"\"\nTemporal aggregation and interval generation.\nApplies sliding window analysis and merges nearby intervals.\n\"\"\"\nfrom typing import Dict, List, Tuple\nfrom dataclasses import dataclass\nfrom collections import defaultdict\nfrom analysis.scorer import FrameScore, Scorer\nfrom config import config\n\n\n@dataclass\nclass SuspiciousInterval:\n    \"\"\"A suspicious time interval for a student.\"\"\"\n    start: float  # Start time in seconds\n    end: float  # End time in seconds\n    peak_score: float\n    reasons: List[str]\n    frame_count: int = 0\n\n\nclass TemporalAggregator:\n    \"\"\"\n    Aggregates frame scores into suspicious intervals.\n    \n    Uses sliding window of 30 seconds (150 frames at 5 FPS).\n    Window is suspicious if >= 20% of frames are suspicious.\n    Merges intervals separated by < 5 seconds.\n    \"\"\"\n    \n    def __init__(self, fps: int):\n        self.fps = fps\n        self.window_size = config.WINDOW_SIZE_SEC * fps  # frames\n        self.suspicious_ratio = config.SUSPICIOUS_FRAME_RATIO\n        self.merge_gap = config.MERGE_GAP_SEC\n        \n        # Storage for frame scores per student\n        self.student_scores: Dict[int, List[FrameScore]] = defaultdict(list)\n        \n        print(f\"[TemporalAggregator] Window: {config.WINDOW_SIZE_SEC}s \"\n              f\"({self.window_size} frames)\")\n        print(f\"[TemporalAggregator] Suspicious ratio: {self.suspicious_ratio}\")\n        print(f\"[TemporalAggregator] Merge gap: {self.merge_gap}s\")\n    \n    def add_score(self, frame_score: Fra"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ],
-      "id": "module:ceeb3e20ed4e62eb"
-    },
-    {
-      "kind": "module",
-      "name": "classroom-anticheat/python-cv-service/analysis/auto_discovery.py",
-      "properties": {
-        "role": "service",
-        "language": "python",
-        "exports": [
-          "DiscoveredSeat",
-          "SeatAutoDiscovery"
-        ],
-        "classes": [
-          "DiscoveredSeat",
-          "SeatAutoDiscovery"
-        ],
-        "functions": [
-          "__init__",
-          "is_discovering",
-          "add_observation",
-          "advance_frame",
-          "finalize_discovery",
-          "_find_stable_tracks",
-          "_generate_seats",
-          "_compute_neighbors",
-          "get_seat_mappings",
-          "get_track_to_student_map"
-        ],
-        "isEntry": false,
-        "path": "classroom-anticheat/python-cv-service/analysis/auto_discovery.py",
-        "external": false,
-        "contentPreview": "\"\"\"\nAuto-discovery module for seat detection.\nAutomatically discovers seat regions from video without manual configuration.\n\"\"\"\nimport numpy as np\nfrom typing import Dict, List, Tuple, Optional\nfrom dataclasses import dataclass, field\nfrom collections import defaultdict\nfrom scipy.spatial import Delaunay\nimport math\n\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track\n\n\n@dataclass\nclass DiscoveredSeat:\n    \"\"\"A seat discovered from tracking data.\"\"\"\n    seat_id: int\n    track_id: int\n    student_id: int  # Same as track_id in auto-discovery\n    centroid: Tuple[int, int]\n    bbox: List[int]  # [x1, y1, x2, y2]\n    neighbors: List[int] = field(default_factory=list)\n    position_samples: List[Tuple[int, int]] = field(default_factory=list)\n    stability_score: float = 0.0\n\n\nclass SeatAutoDiscovery:\n    \"\"\"\n    Automatically discovers seat positions from video.\n    \n    Process:\n    1. Track persons for discovery period (first 2 minutes)\n    2. For each stable track, compute average position\n    3. Generate bounding boxes around stable positions\n    4. Compute neighbor graph based on spatial proximity\n    \"\"\"\n    \n    def __init__(\n        self,\n        discovery_duration_sec: int = 120,\n        fps: int = 5,\n        min_stability_ratio: float = 0.5,\n        bbox_padding: int = 75,\n        neighbor_distance_multiplier: float = 2.0\n    ):\n        \"\"\"\n        Initialize auto-discovery.\n        \n        Args:\n            discovery_duration_sec: How long to obse"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ],
-      "id": "module:849813cf97cb0d15"
-    },
-    {
-      "kind": "module",
-      "name": "classroom-anticheat/python-cv-service/analysis/baseline.py",
-      "properties": {
-        "role": "service",
-        "language": "python",
-        "exports": [
-          "StudentBaseline",
-          "BaselineCalibrator"
-        ],
-        "classes": [
-          "StudentBaseline",
-          "BaselineCalibrator"
-        ],
-        "functions": [
-          "is_ready",
-          "finalize",
-          "__init__",
-          "is_calibrating",
-          "add_sample",
-          "advance_frame",
-          "finalize_calibration",
-          "get_baseline",
-          "get_all_baselines"
-        ],
-        "isEntry": false,
-        "path": "classroom-anticheat/python-cv-service/analysis/baseline.py",
-        "external": false,
-        "contentPreview": "\"\"\"\nBaseline calibration for each student.\nComputes baseline metrics during the first N seconds of the exam.\n\"\"\"\nimport numpy as np\nfrom typing import Dict, List, Optional, Tuple\nfrom dataclasses import dataclass, field\nfrom config import config\n\n\n@dataclass\nclass StudentBaseline:\n    \"\"\"Baseline metrics for a single student.\"\"\"\n    student_id: int\n    baseline_yaw: float = 0.0\n    baseline_gaze: float = 0.0\n    yaw_std: float = 10.0  # Default if not enough data\n    baseline_neighbor_distance: float = 100.0  # Default\n    samples_collected: int = 0\n    \n    # Raw samples for computing statistics\n    yaw_samples: List[float] = field(default_factory=list)\n    gaze_samples: List[float] = field(default_factory=list)\n    distance_samples: List[float] = field(default_factory=list)\n    \n    def is_ready(self) -> bool:\n        \"\"\"Check if baseline has enough samples.\"\"\"\n        return self.samples_collected >= 10  # Minimum samples\n    \n    def finalize(self):\n        \"\"\"Compute final baseline statistics from samples.\"\"\"\n        if self.yaw_samples:\n            self.baseline_yaw = float(np.median(self.yaw_samples))\n            self.yaw_std = float(np.std(self.yaw_samples)) if len(self.yaw_samples) > 1 else 10.0\n        \n        if self.gaze_samples:\n            self.baseline_gaze = float(np.median(self.gaze_samples))\n        \n        if self.distance_samples:\n            self.baseline_neighbor_distance = float(np.median(self.distance_samples))\n        \n        # Clear samples to fre"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ],
-      "id": "module:474fabff5021d1ed"
-    },
-    {
-      "kind": "module",
       "name": "classroom-anticheat/python-cv-service/analysis/pose_estimator.py",
       "properties": {
         "role": "service",
@@ -1182,99 +1081,6 @@
     },
     {
       "kind": "module",
-      "name": "classroom-anticheat/python-cv-service/analysis/scorer.py",
-      "properties": {
-        "role": "service",
-        "language": "python",
-        "exports": [
-          "FrameScore",
-          "Scorer"
-        ],
-        "classes": [
-          "FrameScore",
-          "Scorer"
-        ],
-        "functions": [
-          "__init__",
-          "score_frame",
-          "get_active_reasons"
-        ],
-        "isEntry": false,
-        "path": "classroom-anticheat/python-cv-service/analysis/scorer.py",
-        "external": false,
-        "contentPreview": "\"\"\"\nPer-frame scoring engine.\nComputes suspicion score from binary signals.\n\"\"\"\nfrom dataclasses import dataclass\nfrom typing import List\nfrom analysis.signals import SignalResult\nfrom config import config\n\n\n@dataclass \nclass FrameScore:\n    \"\"\"Score result for a single frame.\"\"\"\n    timestamp: float  # Seconds\n    frame_idx: int\n    student_id: int\n    score: float\n    is_suspicious: bool\n    signals: SignalResult\n    \n    # Which signals contributed\n    head_active: bool = False\n    gaze_active: bool = False\n    proximity_active: bool = False\n\n\nclass Scorer:\n    \"\"\"\n    Computes per-frame suspicion scores from signals.\n    \n    Score formula:\n    S(t) = 0.35 × HeadSignal + 0.25 × GazeSignal + 0.55 × ProximitySignal\n    \n    Suspicious if S(t) >= 0.75\n    \"\"\"\n    \n    def __init__(self):\n        self.weight_head = config.WEIGHT_HEAD\n        self.weight_gaze = config.WEIGHT_GAZE\n        self.weight_proximity = config.WEIGHT_PROXIMITY\n        self.threshold = config.SUSPICIOUS_THRESHOLD\n        \n        print(f\"[Scorer] Weights: Head={self.weight_head}, \"\n              f\"Gaze={self.weight_gaze}, Proximity={self.weight_proximity}\")\n        print(f\"[Scorer] Suspicious threshold: {self.threshold}\")\n    \n    def score_frame(\n        self,\n        frame_idx: int,\n        timestamp: float,\n        student_id: int,\n        signals: SignalResult\n    ) -> FrameScore:\n        \"\"\"\n        Compute suspicion score for a frame.\n        \n        Args:\n            frame_idx: Frame index\n     "
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/scorer.py"
-      ],
-      "id": "module:f53a3def6a73a20a"
-    },
-    {
-      "kind": "module",
-      "name": "classroom-anticheat/python-cv-service/analysis/seat_assigner.py",
-      "properties": {
-        "role": "service",
-        "language": "python",
-        "exports": [
-          "SeatAssignment",
-          "SeatAssigner"
-        ],
-        "classes": [
-          "SeatAssignment",
-          "SeatAssigner"
-        ],
-        "functions": [
-          "__init__",
-          "update",
-          "_process_track",
-          "_find_containing_seat",
-          "_can_assign_to_seat",
-          "get_student_track",
-          "get_student_neighbors",
-          "get_all_confirmed_assignments"
-        ],
-        "isEntry": false,
-        "path": "classroom-anticheat/python-cv-service/analysis/seat_assigner.py",
-        "external": false,
-        "contentPreview": "\"\"\"\nSeat assignment logic.\nMaps tracked persons to seats based on centroid containment.\n\"\"\"\nfrom typing import Dict, List, Optional, Tuple\nfrom dataclasses import dataclass, field\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track\nfrom config import config\n\n\n@dataclass\nclass SeatAssignment:\n    \"\"\"Assignment of a track to a seat.\"\"\"\n    seat_id: int\n    student_id: int\n    track_id: int\n    consecutive_frames: int = 0\n    confirmed: bool = False\n\n\nclass SeatAssigner:\n    \"\"\"\n    Assigns tracked persons to predefined seat regions.\n    Uses centroid containment with stabilization.\n    \"\"\"\n    \n    def __init__(self, seat_map: List[SeatMapping]):\n        \"\"\"\n        Initialize seat assigner.\n        \n        Args:\n            seat_map: List of seat mappings with bounding boxes\n        \"\"\"\n        self.seats = {s.seat_id: s for s in seat_map}\n        self.assignments: Dict[int, SeatAssignment] = {}  # track_id -> assignment\n        self.seat_to_track: Dict[int, int] = {}  # seat_id -> track_id\n        \n        # Build neighbor lookup\n        self.neighbors: Dict[int, List[int]] = {\n            s.seat_id: s.neighbors for s in seat_map\n        }\n        \n        print(f\"[SeatAssigner] Initialized with {len(seat_map)} seats\")\n    \n    def update(self, tracks: List[Track]) -> Dict[int, int]:\n        \"\"\"\n        Update seat assignments based on current tracks.\n        \n        Args:\n            tracks: List of active tracks\n            \n        Returns:\n       "
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/seat_assigner.py"
-      ],
-      "id": "module:f19722c2b3d2a8e1"
-    },
-    {
-      "kind": "module",
-      "name": "classroom-anticheat/python-cv-service/analysis/signals.py",
-      "properties": {
-        "role": "service",
-        "language": "python",
-        "exports": [
-          "compute_distance",
-          "SignalResult",
-          "SignalComputer"
-        ],
-        "classes": [
-          "SignalResult",
-          "SignalComputer"
-        ],
-        "functions": [
-          "__init__",
-          "compute",
-          "compute_distance"
-        ],
-        "isEntry": false,
-        "path": "classroom-anticheat/python-cv-service/analysis/signals.py",
-        "external": false,
-        "contentPreview": "\"\"\"\nSignal computation module.\nComputes binary signals (Head, Gaze, Proximity) from raw features.\n\"\"\"\nfrom typing import Dict, Optional, Tuple\nfrom dataclasses import dataclass\nfrom analysis.baseline import StudentBaseline\nfrom config import config\nimport math\n\n\n@dataclass\nclass SignalResult:\n    \"\"\"Binary signals for a single frame.\"\"\"\n    head_signal: int  # 0 or 1\n    gaze_signal: int  # 0 or 1\n    proximity_signal: int  # 0 or 1\n    \n    # Raw adjusted values for debugging\n    adj_yaw: float = 0.0\n    adj_gaze: float = 0.0\n    current_distance: float = 0.0\n\n\nclass SignalComputer:\n    \"\"\"\n    Computes binary signals from pose estimates and baseline.\n    \"\"\"\n    \n    def __init__(self):\n        print(\"[SignalComputer] Initialized with thresholds:\")\n        print(f\"  Head: max({config.HEAD_YAW_MIN_THRESHOLD}°, \"\n              f\"{config.HEAD_YAW_STD_MULTIPLIER} × yaw_std)\")\n        print(f\"  Gaze: |adj_gaze| > {config.GAZE_THRESHOLD}\")\n        print(f\"  Proximity: dist < baseline × {config.PROXIMITY_RATIO}\")\n    \n    def compute(\n        self,\n        student_id: int,\n        baseline: StudentBaseline,\n        yaw: float,\n        gaze_x: float,\n        neighbor_distance: Optional[float] = None,\n        neighbor_yaw: Optional[float] = None\n    ) -> SignalResult:\n        \"\"\"\n        Compute signals for a frame.\n        \n        Args:\n            student_id: Student identifier\n            baseline: Student's baseline metrics\n            yaw: Current head yaw\n            gaze_x: "
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
-      ],
-      "id": "module:6df59850283b74d8"
-    },
-    {
-      "kind": "module",
       "name": "classroom-anticheat/python-cv-service/config.py",
       "properties": {
         "role": "service",
@@ -1289,7 +1095,7 @@
         "isEntry": false,
         "path": "classroom-anticheat/python-cv-service/config.py",
         "external": false,
-        "contentPreview": "\"\"\"\nConfiguration settings for the CV service.\n\"\"\"\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass Config:\n    # Frame sampling\n    FPS_SAMPLING: int = 5\n    \n    # Baseline calibration\n    BASELINE_DURATION_SEC: int = 60\n    \n    # Signal thresholds\n    HEAD_YAW_MIN_THRESHOLD: float = 25.0  # degrees\n    HEAD_YAW_STD_MULTIPLIER: float = 2.0\n    GAZE_THRESHOLD: float = 0.4\n    PROXIMITY_RATIO: float = 0.7\n    \n    # Signal weights\n    WEIGHT_HEAD: float = 0.35\n    WEIGHT_GAZE: float = 0.25\n    WEIGHT_PROXIMITY: float = 0.55\n    \n    # Scoring\n    SUSPICIOUS_THRESHOLD: float = 0.75\n    \n    # Temporal aggregation\n    WINDOW_SIZE_SEC: int = 30\n    SUSPICIOUS_FRAME_RATIO: float = 0.20  # 20%\n    \n    # Interval merging\n    MERGE_GAP_SEC: float = 5.0\n    \n    # Seat assignment stabilization\n    STABILIZATION_FRAMES: int = 10\n    \n    # Detection confidence\n    YOLO_CONFIDENCE: float = 0.5\n    MIN_DETECTION_CONFIDENCE: float = 0.60\n    NMS_IOU_THRESHOLD: float = 0.30\n    MIN_PERSON_BOX_AREA: float = 2500.0\n    MIN_PERSON_ASPECT_RATIO: float = 1.1\n    MAX_PERSON_ASPECT_RATIO: float = 4.5\n\n    # Pose estimator pre-gate (do not run face landmarks for tiny faces)\n    MIN_FACE_CROP_PX: int = 35\n    \n    # Server\n    HOST: str = \"0.0.0.0\"\n    PORT: int = 8000\n\n    # Track-centric identity & quality gates\n    MIN_TRACK_LIFESPAN_SEC: float = 10.0\n    TRACK_STABILITY_MIN_SCORE: float = 0.45  # 0..1\n    MIN_FRAME_VISIBILITY_SCORE: float = 0.45  # derived from pose landmark visibility a"
+        "contentPreview": "\"\"\"\nConfiguration settings for the CV service.\n\"\"\"\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass Config:\n    # Frame sampling\n    FPS_SAMPLING: int = 5\n    \n    # Baseline calibration\n    BASELINE_DURATION_SEC: int = 60\n    \n    # Signal thresholds\n    HEAD_YAW_MIN_THRESHOLD: float = 25.0  # degrees\n    HEAD_YAW_STD_MULTIPLIER: float = 2.0\n    GAZE_THRESHOLD: float = 0.4\n    PROXIMITY_RATIO: float = 0.7\n    \n    # Signal weights (must sum to 1.0)\n    HEAD_WEIGHT: float = 0.35\n    GAZE_WEIGHT: float = 0.22\n    PROXIMITY_WEIGHT: float = 0.43\n\n    # Backward-compatible aliases\n    WEIGHT_HEAD: float = HEAD_WEIGHT\n    WEIGHT_GAZE: float = GAZE_WEIGHT\n    WEIGHT_PROXIMITY: float = PROXIMITY_WEIGHT\n    \n    # Scoring\n    SUSPICIOUS_THRESHOLD: float = 0.75\n    \n    # Temporal aggregation\n    WINDOW_SIZE_SEC: int = 30\n    SUSPICIOUS_FRAME_RATIO: float = 0.20  # 20%\n    \n    # Interval merging\n    MERGE_GAP_SEC: float = 5.0\n    \n    # Seat assignment stabilization\n    STABILIZATION_FRAMES: int = 10\n    \n    # Detection confidence\n    YOLO_CONFIDENCE: float = 0.5\n    MIN_DETECTION_CONFIDENCE: float = 0.60\n    NMS_IOU_THRESHOLD: float = 0.30\n    MIN_PERSON_BOX_AREA: float = 2500.0\n    MIN_PERSON_ASPECT_RATIO: float = 1.1\n    MAX_PERSON_ASPECT_RATIO: float = 4.5\n\n    # Pose estimator pre-gate (do not run face landmarks for tiny faces)\n    MIN_FACE_CROP_PX: int = 35\n    \n    # Server\n    HOST: str = \"0.0.0.0\"\n    PORT: int = 8000\n\n    # Track-centric identity & quality gates\n    MI"
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/config.py"
@@ -1335,6 +1141,7 @@
           "PersonDetector"
         ],
         "functions": [
+          "_resolve_model_path",
           "from_xyxy",
           "__init__",
           "detect",
@@ -1343,7 +1150,7 @@
         "isEntry": false,
         "path": "classroom-anticheat/python-cv-service/detection/detector.py",
         "external": false,
-        "contentPreview": "\"\"\"\nYOLOv8-based person detection.\n\"\"\"\nfrom ultralytics import YOLO\nimport numpy as np\nfrom typing import List, Tuple, Optional\nfrom dataclasses import dataclass\n\n\n@dataclass\nclass Detection:\n    \"\"\"Single person detection result.\"\"\"\n    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2\n    confidence: float\n    centroid: Tuple[int, int]\n    \n    @classmethod\n    def from_xyxy(cls, xyxy: np.ndarray, conf: float) -> 'Detection':\n        x1, y1, x2, y2 = map(int, xyxy)\n        centroid = ((x1 + x2) // 2, (y1 + y2) // 2)\n        return cls(bbox=(x1, y1, x2, y2), confidence=conf, centroid=centroid)\n\n\nclass PersonDetector:\n    \"\"\"YOLOv8-based person detector.\"\"\"\n    \n    PERSON_CLASS_ID = 0  # COCO class ID for person\n    \n    def __init__(self, model_name: str = \"yolov8n.pt\", confidence: float = 0.5):\n        \"\"\"\n        Initialize detector with YOLOv8 model.\n        \n        Args:\n            model_name: YOLOv8 model variant\n            confidence: Minimum confidence threshold\n        \"\"\"\n        self.model = YOLO(model_name)\n        self.confidence = confidence\n        print(f\"[Detector] Loaded {model_name} with confidence threshold {confidence}\")\n    \n    def detect(self, frame: np.ndarray) -> List[Detection]:\n        \"\"\"\n        Detect persons in a frame.\n        \n        Args:\n            frame: BGR image as numpy array\n            \n        Returns:\n            List of Detection objects\n        \"\"\"\n        results = self.model(frame, verbose=False, conf=self.confidence)\n    "
+        "contentPreview": "\"\"\"\nYOLOv8-based person detection.\n\"\"\"\nfrom pathlib import Path\nfrom ultralytics import YOLO\nimport numpy as np\nfrom typing import List, Tuple\nfrom dataclasses import dataclass\n\n\ndef _resolve_model_path(filename: str) -> str:\n    candidates = [\n        Path(__file__).parent / filename,\n        Path(__file__).parent.parent / filename,\n        Path(__file__).parent.parent.parent / filename,\n        Path(filename),\n    ]\n    for p in candidates:\n        if p.exists():\n            return str(p)\n    raise FileNotFoundError(\n        f\"Model file '{filename}' not found. Place it in python-cv-service/ \"\n        f\"or set an absolute path. Searched: {[str(c) for c in candidates]}\"\n    )\n\n\n@dataclass\nclass Detection:\n    \"\"\"Single person detection result.\"\"\"\n    bbox: Tuple[int, int, int, int]  # x1, y1, x2, y2\n    confidence: float\n    centroid: Tuple[int, int]\n    \n    @classmethod\n    def from_xyxy(cls, xyxy: np.ndarray, conf: float) -> 'Detection':\n        x1, y1, x2, y2 = map(int, xyxy)\n        centroid = ((x1 + x2) // 2, (y1 + y2) // 2)\n        return cls(bbox=(x1, y1, x2, y2), confidence=conf, centroid=centroid)\n\n\nclass PersonDetector:\n    \"\"\"YOLOv8-based person detector.\"\"\"\n    \n    PERSON_CLASS_ID = 0  # COCO class ID for person\n    \n    def __init__(self, model_name: str = \"yolov8n.pt\", confidence: float = 0.5):\n        \"\"\"\n        Initialize detector with YOLOv8 model.\n        \n        Args:\n            model_name: YOLOv8 model variant\n            confidence: Minimum confiden"
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/detection/detector.py"
@@ -2337,6 +2144,202 @@
     },
     {
       "kind": "module",
+      "name": "classroom-anticheat/python-cv-service/legacy/aggregator.py",
+      "properties": {
+        "role": "service",
+        "language": "python",
+        "exports": [
+          "SuspiciousInterval",
+          "TemporalAggregator"
+        ],
+        "classes": [
+          "SuspiciousInterval",
+          "TemporalAggregator"
+        ],
+        "functions": [
+          "__init__",
+          "add_score",
+          "aggregate",
+          "_find_suspicious_windows",
+          "_merge_windows",
+          "reset"
+        ],
+        "isEntry": false,
+        "path": "classroom-anticheat/python-cv-service/legacy/aggregator.py",
+        "external": false,
+        "contentPreview": "\"\"\"\nTemporal aggregation and interval generation.\nApplies sliding window analysis and merges nearby intervals.\n\"\"\"\nfrom typing import Dict, List, Tuple\nfrom dataclasses import dataclass\nfrom collections import defaultdict\nfrom analysis.scorer import FrameScore, Scorer\nfrom config import config\n\n\n@dataclass\nclass SuspiciousInterval:\n    \"\"\"A suspicious time interval for a student.\"\"\"\n    start: float  # Start time in seconds\n    end: float  # End time in seconds\n    peak_score: float\n    reasons: List[str]\n    frame_count: int = 0\n\n\nclass TemporalAggregator:\n    \"\"\"\n    Aggregates frame scores into suspicious intervals.\n    \n    Uses sliding window of 30 seconds (150 frames at 5 FPS).\n    Window is suspicious if >= 20% of frames are suspicious.\n    Merges intervals separated by < 5 seconds.\n    \"\"\"\n    \n    def __init__(self, fps: int):\n        self.fps = fps\n        self.window_size = config.WINDOW_SIZE_SEC * fps  # frames\n        self.suspicious_ratio = config.SUSPICIOUS_FRAME_RATIO\n        self.merge_gap = config.MERGE_GAP_SEC\n        \n        # Storage for frame scores per student\n        self.student_scores: Dict[int, List[FrameScore]] = defaultdict(list)\n        \n        print(f\"[TemporalAggregator] Window: {config.WINDOW_SIZE_SEC}s \"\n              f\"({self.window_size} frames)\")\n        print(f\"[TemporalAggregator] Suspicious ratio: {self.suspicious_ratio}\")\n        print(f\"[TemporalAggregator] Merge gap: {self.merge_gap}s\")\n    \n    def add_score(self, frame_score: Fra"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ],
+      "id": "module:41fba60ac8d4199e"
+    },
+    {
+      "kind": "module",
+      "name": "classroom-anticheat/python-cv-service/legacy/auto_discovery.py",
+      "properties": {
+        "role": "service",
+        "language": "python",
+        "exports": [
+          "DiscoveredSeat",
+          "SeatAutoDiscovery"
+        ],
+        "classes": [
+          "DiscoveredSeat",
+          "SeatAutoDiscovery"
+        ],
+        "functions": [
+          "__init__",
+          "is_discovering",
+          "add_observation",
+          "advance_frame",
+          "finalize_discovery",
+          "_find_stable_tracks",
+          "_generate_seats",
+          "_compute_neighbors",
+          "get_seat_mappings",
+          "get_track_to_student_map"
+        ],
+        "isEntry": false,
+        "path": "classroom-anticheat/python-cv-service/legacy/auto_discovery.py",
+        "external": false,
+        "contentPreview": "\"\"\"\nAuto-discovery module for seat detection.\nAutomatically discovers seat regions from video without manual configuration.\n\"\"\"\nimport numpy as np\nfrom typing import Dict, List, Tuple, Optional\nfrom dataclasses import dataclass, field\nfrom collections import defaultdict\nfrom scipy.spatial import Delaunay\nimport math\n\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track\n\n\n@dataclass\nclass DiscoveredSeat:\n    \"\"\"A seat discovered from tracking data.\"\"\"\n    seat_id: int\n    track_id: int\n    student_id: int  # Same as track_id in auto-discovery\n    centroid: Tuple[int, int]\n    bbox: List[int]  # [x1, y1, x2, y2]\n    neighbors: List[int] = field(default_factory=list)\n    position_samples: List[Tuple[int, int]] = field(default_factory=list)\n    stability_score: float = 0.0\n\n\nclass SeatAutoDiscovery:\n    \"\"\"\n    Automatically discovers seat positions from video.\n    \n    Process:\n    1. Track persons for discovery period (first 2 minutes)\n    2. For each stable track, compute average position\n    3. Generate bounding boxes around stable positions\n    4. Compute neighbor graph based on spatial proximity\n    \"\"\"\n    \n    def __init__(\n        self,\n        discovery_duration_sec: int = 120,\n        fps: int = 5,\n        min_stability_ratio: float = 0.5,\n        bbox_padding: int = 75,\n        neighbor_distance_multiplier: float = 2.0\n    ):\n        \"\"\"\n        Initialize auto-discovery.\n        \n        Args:\n            discovery_duration_sec: How long to obse"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ],
+      "id": "module:e8db01938b8e9684"
+    },
+    {
+      "kind": "module",
+      "name": "classroom-anticheat/python-cv-service/legacy/baseline.py",
+      "properties": {
+        "role": "service",
+        "language": "python",
+        "exports": [
+          "StudentBaseline",
+          "BaselineCalibrator"
+        ],
+        "classes": [
+          "StudentBaseline",
+          "BaselineCalibrator"
+        ],
+        "functions": [
+          "is_ready",
+          "finalize",
+          "__init__",
+          "is_calibrating",
+          "add_sample",
+          "advance_frame",
+          "finalize_calibration",
+          "get_baseline",
+          "get_all_baselines"
+        ],
+        "isEntry": false,
+        "path": "classroom-anticheat/python-cv-service/legacy/baseline.py",
+        "external": false,
+        "contentPreview": "\"\"\"\nBaseline calibration for each student.\nComputes baseline metrics during the first N seconds of the exam.\n\"\"\"\nimport numpy as np\nfrom typing import Dict, List, Optional, Tuple\nfrom dataclasses import dataclass, field\nfrom config import config\n\n\n@dataclass\nclass StudentBaseline:\n    \"\"\"Baseline metrics for a single student.\"\"\"\n    student_id: int\n    baseline_yaw: float = 0.0\n    baseline_gaze: float = 0.0\n    yaw_std: float = 10.0  # Default if not enough data\n    baseline_neighbor_distance: float = 100.0  # Default\n    samples_collected: int = 0\n    \n    # Raw samples for computing statistics\n    yaw_samples: List[float] = field(default_factory=list)\n    gaze_samples: List[float] = field(default_factory=list)\n    distance_samples: List[float] = field(default_factory=list)\n    \n    def is_ready(self) -> bool:\n        \"\"\"Check if baseline has enough samples.\"\"\"\n        return self.samples_collected >= 10  # Minimum samples\n    \n    def finalize(self):\n        \"\"\"Compute final baseline statistics from samples.\"\"\"\n        if self.yaw_samples:\n            self.baseline_yaw = float(np.median(self.yaw_samples))\n            self.yaw_std = float(np.std(self.yaw_samples)) if len(self.yaw_samples) > 1 else 10.0\n        \n        if self.gaze_samples:\n            self.baseline_gaze = float(np.median(self.gaze_samples))\n        \n        if self.distance_samples:\n            self.baseline_neighbor_distance = float(np.median(self.distance_samples))\n        \n        # Clear samples to fre"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ],
+      "id": "module:cbc112d41005e84d"
+    },
+    {
+      "kind": "module",
+      "name": "classroom-anticheat/python-cv-service/legacy/scorer.py",
+      "properties": {
+        "role": "service",
+        "language": "python",
+        "exports": [
+          "FrameScore",
+          "Scorer"
+        ],
+        "classes": [
+          "FrameScore",
+          "Scorer"
+        ],
+        "functions": [
+          "__init__",
+          "score_frame",
+          "get_active_reasons"
+        ],
+        "isEntry": false,
+        "path": "classroom-anticheat/python-cv-service/legacy/scorer.py",
+        "external": false,
+        "contentPreview": "\"\"\"\nPer-frame scoring engine.\nComputes suspicion score from binary signals.\n\"\"\"\nfrom dataclasses import dataclass\nfrom typing import List\nfrom analysis.signals import SignalResult\nfrom config import config\n\n\n@dataclass \nclass FrameScore:\n    \"\"\"Score result for a single frame.\"\"\"\n    timestamp: float  # Seconds\n    frame_idx: int\n    student_id: int\n    score: float\n    is_suspicious: bool\n    signals: SignalResult\n    \n    # Which signals contributed\n    head_active: bool = False\n    gaze_active: bool = False\n    proximity_active: bool = False\n\n\nclass Scorer:\n    \"\"\"\n    Computes per-frame suspicion scores from signals.\n    \n    Score formula:\n    S(t) = 0.35 × HeadSignal + 0.25 × GazeSignal + 0.55 × ProximitySignal\n    \n    Suspicious if S(t) >= 0.75\n    \"\"\"\n    \n    def __init__(self):\n        self.weight_head = config.WEIGHT_HEAD\n        self.weight_gaze = config.WEIGHT_GAZE\n        self.weight_proximity = config.WEIGHT_PROXIMITY\n        self.threshold = config.SUSPICIOUS_THRESHOLD\n        \n        print(f\"[Scorer] Weights: Head={self.weight_head}, \"\n              f\"Gaze={self.weight_gaze}, Proximity={self.weight_proximity}\")\n        print(f\"[Scorer] Suspicious threshold: {self.threshold}\")\n    \n    def score_frame(\n        self,\n        frame_idx: int,\n        timestamp: float,\n        student_id: int,\n        signals: SignalResult\n    ) -> FrameScore:\n        \"\"\"\n        Compute suspicion score for a frame.\n        \n        Args:\n            frame_idx: Frame index\n     "
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/scorer.py"
+      ],
+      "id": "module:b8eebc9544da86d7"
+    },
+    {
+      "kind": "module",
+      "name": "classroom-anticheat/python-cv-service/legacy/seat_assigner.py",
+      "properties": {
+        "role": "service",
+        "language": "python",
+        "exports": [
+          "SeatAssignment",
+          "SeatAssigner"
+        ],
+        "classes": [
+          "SeatAssignment",
+          "SeatAssigner"
+        ],
+        "functions": [
+          "__init__",
+          "update",
+          "_process_track",
+          "_find_containing_seat",
+          "_can_assign_to_seat",
+          "get_student_track",
+          "get_student_neighbors",
+          "get_all_confirmed_assignments"
+        ],
+        "isEntry": false,
+        "path": "classroom-anticheat/python-cv-service/legacy/seat_assigner.py",
+        "external": false,
+        "contentPreview": "\"\"\"\nSeat assignment logic.\nMaps tracked persons to seats based on centroid containment.\n\"\"\"\nfrom typing import Dict, List, Optional, Tuple\nfrom dataclasses import dataclass, field\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track\nfrom config import config\n\n\n@dataclass\nclass SeatAssignment:\n    \"\"\"Assignment of a track to a seat.\"\"\"\n    seat_id: int\n    student_id: int\n    track_id: int\n    consecutive_frames: int = 0\n    confirmed: bool = False\n\n\nclass SeatAssigner:\n    \"\"\"\n    Assigns tracked persons to predefined seat regions.\n    Uses centroid containment with stabilization.\n    \"\"\"\n    \n    def __init__(self, seat_map: List[SeatMapping]):\n        \"\"\"\n        Initialize seat assigner.\n        \n        Args:\n            seat_map: List of seat mappings with bounding boxes\n        \"\"\"\n        self.seats = {s.seat_id: s for s in seat_map}\n        self.assignments: Dict[int, SeatAssignment] = {}  # track_id -> assignment\n        self.seat_to_track: Dict[int, int] = {}  # seat_id -> track_id\n        \n        # Build neighbor lookup\n        self.neighbors: Dict[int, List[int]] = {\n            s.seat_id: s.neighbors for s in seat_map\n        }\n        \n        print(f\"[SeatAssigner] Initialized with {len(seat_map)} seats\")\n    \n    def update(self, tracks: List[Track]) -> Dict[int, int]:\n        \"\"\"\n        Update seat assignments based on current tracks.\n        \n        Args:\n            tracks: List of active tracks\n            \n        Returns:\n       "
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/seat_assigner.py"
+      ],
+      "id": "module:b255eb7fbdcbff11"
+    },
+    {
+      "kind": "module",
+      "name": "classroom-anticheat/python-cv-service/legacy/signals.py",
+      "properties": {
+        "role": "service",
+        "language": "python",
+        "exports": [
+          "compute_distance",
+          "SignalResult",
+          "SignalComputer"
+        ],
+        "classes": [
+          "SignalResult",
+          "SignalComputer"
+        ],
+        "functions": [
+          "__init__",
+          "compute",
+          "compute_distance"
+        ],
+        "isEntry": false,
+        "path": "classroom-anticheat/python-cv-service/legacy/signals.py",
+        "external": false,
+        "contentPreview": "\"\"\"\nSignal computation module.\nComputes binary signals (Head, Gaze, Proximity) from raw features.\n\"\"\"\nfrom typing import Dict, Optional, Tuple\nfrom dataclasses import dataclass\nfrom analysis.baseline import StudentBaseline\nfrom config import config\nimport math\n\n\n@dataclass\nclass SignalResult:\n    \"\"\"Binary signals for a single frame.\"\"\"\n    head_signal: int  # 0 or 1\n    gaze_signal: int  # 0 or 1\n    proximity_signal: int  # 0 or 1\n    \n    # Raw adjusted values for debugging\n    adj_yaw: float = 0.0\n    adj_gaze: float = 0.0\n    current_distance: float = 0.0\n\n\nclass SignalComputer:\n    \"\"\"\n    Computes binary signals from pose estimates and baseline.\n    \"\"\"\n    \n    def __init__(self):\n        print(\"[SignalComputer] Initialized with thresholds:\")\n        print(f\"  Head: max({config.HEAD_YAW_MIN_THRESHOLD}°, \"\n              f\"{config.HEAD_YAW_STD_MULTIPLIER} × yaw_std)\")\n        print(f\"  Gaze: |adj_gaze| > {config.GAZE_THRESHOLD}\")\n        print(f\"  Proximity: dist < baseline × {config.PROXIMITY_RATIO}\")\n    \n    def compute(\n        self,\n        student_id: int,\n        baseline: StudentBaseline,\n        yaw: float,\n        gaze_x: float,\n        neighbor_distance: Optional[float] = None,\n        neighbor_yaw: Optional[float] = None\n    ) -> SignalResult:\n        \"\"\"\n        Compute signals for a frame.\n        \n        Args:\n            student_id: Student identifier\n            baseline: Student's baseline metrics\n            yaw: Current head yaw\n            gaze_x: "
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
+      ],
+      "id": "module:6d88859e47534395"
+    },
+    {
+      "kind": "module",
       "name": "classroom-anticheat/python-cv-service/main.py",
       "properties": {
         "role": "api-route",
@@ -2434,11 +2437,13 @@
           "JobResultResponse",
           "HealthResponse"
         ],
-        "functions": [],
+        "functions": [
+          "no_traversal"
+        ],
         "isEntry": false,
         "path": "classroom-anticheat/python-cv-service/models/schemas.py",
         "external": false,
-        "contentPreview": "\"\"\"\nPydantic models for API request/response schemas.\n\nNote: This service is track-centric (per ByteTrack track_id) and uncertainty-aware.\n\"\"\"\n\nfrom typing import Any, Dict, List, Optional\n\nfrom pydantic import BaseModel, ConfigDict\n\n\nclass AnalysisRequest(BaseModel):\n    model_config = ConfigDict(extra=\"ignore\")\n\n    exam_id: str\n    video_path: str\n\n    # Frames are sampled at this effective FPS for analysis and persistence.\n    fps_sampling: int = 5\n\n    # Phase 3 rendering (pure visualization; no CV inference). Default off.\n    render_annotated_video: bool = False\n\n\nclass AnalyzeJobCreateResponse(BaseModel):\n    job_id: str\n\n\nclass JobStatusResponse(BaseModel):\n    job_id: str\n    status: str  # queued | running | completed | failed\n    progress: float = 0.0\n    message: Optional[str] = None\n\n\nclass SupportingStats(BaseModel):\n    head_deviation_pct: float\n    gaze_deviation_pct: float\n    proximity_avg_distance: Optional[float] = None\n    proximity_min_distance: Optional[float] = None\n\n\nclass SuspicionInterval(BaseModel):\n    start: float\n    end: float\n\n    duration: float\n    peak_score: float\n    avg_score: float\n\n    # Avg confidence_weight across the interval frames (0..1).\n    confidence: float\n\n    # Ranked list by average component contribution.\n    dominant_signals: List[str]\n\n    supporting_stats: SupportingStats\n\n\nclass TrackResult(BaseModel):\n    track_id: int\n    total_duration: float\n    stability_score: float\n    intervals: List[SuspicionInterval]\n\n\nclass "
+        "contentPreview": "\"\"\"\nPydantic models for API request/response schemas.\n\nNote: This service is track-centric (per ByteTrack track_id) and uncertainty-aware.\n\"\"\"\n\nfrom typing import Any, Dict, List, Optional\n\nfrom pydantic import BaseModel, ConfigDict, field_validator\n\n\nclass AnalysisRequest(BaseModel):\n    model_config = ConfigDict(extra=\"ignore\")\n\n    exam_id: str\n    video_path: str\n\n    # Frames are sampled at this effective FPS for analysis and persistence.\n    fps_sampling: int = 5\n\n    # Phase 3 rendering (pure visualization; no CV inference). Default off.\n    render_annotated_video: bool = False\n\n    @field_validator(\"video_path\")\n    @classmethod\n    def no_traversal(cls, v: str) -> str:\n        if \"..\" in v:\n            raise ValueError(\"video_path must not contain directory traversal sequences.\")\n        return v\n\n\nclass AnalyzeJobCreateResponse(BaseModel):\n    job_id: str\n\n\nclass JobStatusResponse(BaseModel):\n    job_id: str\n    status: str  # queued | running | completed | failed\n    progress: float = 0.0\n    message: Optional[str] = None\n\n\nclass SupportingStats(BaseModel):\n    head_deviation_pct: float\n    gaze_deviation_pct: float\n    proximity_avg_distance: Optional[float] = None\n    proximity_min_distance: Optional[float] = None\n\n\nclass SuspicionInterval(BaseModel):\n    start: float\n    end: float\n\n    duration: float\n    peak_score: float\n    avg_score: float\n\n    # Avg confidence_weight across the interval frames (0..1).\n    confidence: float\n\n    # Ranked list by average com"
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/models/schemas.py"
@@ -2514,6 +2519,7 @@
           "_median",
           "__init__",
           "_load_video_duration_sec",
+          "_load_phase1_stats",
           "run",
           "_centroid_from_bbox",
           "_ensure_state",
@@ -2525,7 +2531,7 @@
         "isEntry": false,
         "path": "classroom-anticheat/python-cv-service/pipeline/phase2_scoring.py",
         "external": false,
-        "contentPreview": "\"\"\"\nPhase 2: scoring + robust aggregation.\n\nThis phase reads Phase 1 JSONL features and produces track-centric suspicious intervals\nusing:\n- Rolling baseline per track (sliding window; ignore low-confidence frames)\n- Confidence-weighted scoring (final = raw * confidence_weight)\n- EMA smoothing + hysteresis thresholds\n- Gap-based interval merging\n- Failure/quality gates (discard low-stability tracks; discard low-confidence intervals)\n\"\"\"\n\nfrom __future__ import annotations\n\nimport json\nfrom collections import defaultdict, deque\nfrom dataclasses import dataclass\nfrom pathlib import Path\nfrom typing import Any, Deque, Dict, List, Optional, Tuple\n\nimport numpy as np\n\nfrom config import config\n\n\ndef _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:\n    return float(max(lo, min(hi, x)))\n\n\ndef _median(d: Deque[float]) -> Optional[float]:\n    if not d:\n        return None\n    return float(np.median(np.array(list(d), dtype=np.float64)))\n\n\n@dataclass\nclass IntervalAcc:\n    start_time: float\n    end_time: float\n\n    frame_count: int = 0\n    sum_score: float = 0.0\n    peak_score: float = 0.0\n    sum_confidence_weight: float = 0.0\n\n    # Component sums (accumulate only when baseline-ready + pose-quality).\n    head_signal_sum: float = 0.0\n    gaze_signal_sum: float = 0.0\n    proximity_signal_sum: float = 0.0\n    component_sum_frames: int = 0\n\n    head_deviation_flag_count: int = 0\n    gaze_deviation_flag_count: int = 0\n\n    proximity_distance_sum: float = 0.0\n    proximity_dista"
+        "contentPreview": "\"\"\"\nPhase 2: scoring + robust aggregation.\n\nThis phase reads Phase 1 JSONL features and produces track-centric suspicious intervals\nusing:\n- Rolling baseline per track (sliding window; ignore low-confidence frames)\n- Confidence-weighted scoring (final = raw * confidence_weight)\n- EMA smoothing + hysteresis thresholds\n- Gap-based interval merging\n- Failure/quality gates (discard low-stability tracks; discard low-confidence intervals)\n\"\"\"\n\nfrom __future__ import annotations\n\nimport json\nfrom collections import defaultdict, deque\nfrom dataclasses import dataclass\nfrom pathlib import Path\nfrom typing import Any, Deque, Dict, List, Optional, Tuple\n\nimport numpy as np\n\nfrom config import config\n\n\nassert abs(config.HEAD_WEIGHT + config.GAZE_WEIGHT + config.PROXIMITY_WEIGHT - 1.0) < 1e-9, (\n    \"Signal weights must sum to 1.0\"\n)\n\n\ndef _clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:\n    return float(max(lo, min(hi, x)))\n\n\ndef _median(d: Deque[float]) -> Optional[float]:\n    if not d:\n        return None\n    return float(np.median(np.array(list(d), dtype=np.float64)))\n\n\n@dataclass\nclass IntervalAcc:\n    start_time: float\n    end_time: float\n\n    frame_count: int = 0\n    sum_score: float = 0.0\n    peak_score: float = 0.0\n    sum_confidence_weight: float = 0.0\n\n    # Component sums (accumulate only when baseline-ready + pose-quality).\n    head_signal_sum: float = 0.0\n    gaze_signal_sum: float = 0.0\n    proximity_signal_sum: float = 0.0\n    component_sum_frames: int = 0\n\n   "
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/pipeline/phase2_scoring.py"
@@ -2539,14 +2545,17 @@
         "role": "service",
         "language": "python",
         "exports": [
+          "validate_video_path",
           "VideoProcessor"
         ],
         "classes": [
           "VideoProcessor"
         ],
         "functions": [
+          "validate_video_path",
           "__init__",
           "_resolve_video_path",
+          "_update_job_status_details",
           "run",
           "_render_bg",
           "_read_results_json"
@@ -2554,7 +2563,7 @@
         "isEntry": false,
         "path": "classroom-anticheat/python-cv-service/pipeline/processor.py",
         "external": false,
-        "contentPreview": "\"\"\"\nUncertainty-aware, track-centric two-phase pipeline orchestrator.\n\nPhase 1 (Feature Extraction):\n- Persist per-frame/per-track features to disk (JSONL + track_meta.json)\n- No decisions, no suspicious interval computation\n\nPhase 2 (Scoring + Aggregation):\n- Read persisted features\n- Compute confidence-weighted suspicion scores using a rolling baseline per track\n- Apply EMA + hysteresis + robust interval merging\n- Apply quality gates and return uncertainty-aware intervals\n\"\"\"\n\nfrom __future__ import annotations\n\nfrom pathlib import Path\nfrom typing import Any, Dict, Optional\n\nfrom config import config\nfrom models.schemas import AnalysisRequest\n\nfrom pipeline.feature_extractor import FeatureExtractorPhase1\nfrom pipeline.phase2_scoring import Phase2Scoring\nfrom pipeline.video_visualizer import VideoVisualizer\n\n\nclass VideoProcessor:\n    \"\"\"\n    Two-phase processor:\n    - Phase 1 always runs fresh for each invocation.\n    - If phase2 outputs exist, Phase 2 is skipped.\n    \"\"\"\n\n    def __init__(self, request: AnalysisRequest):\n        self.request = request\n        self.fps_sampling = int(request.fps_sampling)\n\n    def _resolve_video_path(self) -> str:\n        \"\"\"\n        Resolve request video path to an existing absolute path.\n\n        Supports:\n        - absolute paths\n        - paths relative to current working directory\n        - paths relative to python-cv-service root\n        - paths relative to repository root\n        - bare filenames placed in java-orchestrator/videos\n "
+        "contentPreview": "\"\"\"\nUncertainty-aware, track-centric two-phase pipeline orchestrator.\n\nPhase 1 (Feature Extraction):\n- Persist per-frame/per-track features to disk (JSONL + track_meta.json)\n- No decisions, no suspicious interval computation\n\nPhase 2 (Scoring + Aggregation):\n- Read persisted features\n- Compute confidence-weighted suspicion scores using a rolling baseline per track\n- Apply EMA + hysteresis + robust interval merging\n- Apply quality gates and return uncertainty-aware intervals\n\"\"\"\n\nfrom __future__ import annotations\n\nimport json\nfrom pathlib import Path\nfrom typing import Any, Dict, Optional\n\nfrom config import config\nfrom models.schemas import AnalysisRequest\n\nfrom pipeline.feature_extractor import FeatureExtractorPhase1\nfrom pipeline.phase2_scoring import Phase2Scoring\nfrom pipeline.video_visualizer import VideoVisualizer\n\n\ndef validate_video_path(raw_path: str, project_root: Path) -> Path:\n    # Block traversal/absolute paths immediately.\n    if \"..\" in raw_path or raw_path.startswith(\"/\"):\n        raise ValueError(\n            \"Invalid video_path: absolute paths and directory traversal are not allowed. \"\n            \"Place video files under the 'videos/' directory and use filenames only.\"\n        )\n\n    for base in config.ALLOWED_VIDEO_BASE_DIRS:\n        candidate = (project_root / base / raw_path).resolve()\n        allowed_root = (project_root / base).resolve()\n        if str(candidate).startswith(str(allowed_root)) and candidate.exists() and candidate.is_file():\n          "
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/pipeline/processor.py"
@@ -3679,222 +3688,6 @@
       ]
     },
     {
-      "id": "module:02d7d3475883e6dc",
-      "kind": "module",
-      "name": "typing",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "typing",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "id": "module:cebf61970d756b53",
-      "kind": "module",
-      "name": "dataclasses",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "dataclasses",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "id": "module:fa4b9d69fdddc7c1",
-      "kind": "module",
-      "name": "collections",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "collections",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "id": "module:d039e7e5c04b73cd",
-      "kind": "module",
-      "name": "scipy.spatial",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "scipy.spatial",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "id": "module:a65e1d3845cf3b10",
-      "kind": "module",
-      "name": "numpy",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "numpy",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "id": "module:a1fffaaafb7cc996",
-      "kind": "module",
-      "name": "List",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "List",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "id": "module:c41a2be51027c17d",
-      "kind": "module",
-      "name": "Tuple",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "Tuple",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "id": "module:7c448bbc41f7feb6",
-      "kind": "module",
-      "name": "Optional\nfrom dataclasses import dataclass",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "Optional\nfrom dataclasses import dataclass",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "id": "module:98c38560c69c878d",
-      "kind": "module",
-      "name": "field\nfrom collections import defaultdict\nfrom scipy.spatial import Delaunay\nimport math\n\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "field\nfrom collections import defaultdict\nfrom scipy.spatial import Delaunay\nimport math\n\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "id": "module:0c6c4102d4dfec3b",
-      "kind": "module",
-      "name": "Optional",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "Optional",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "id": "module:f010df488131c019",
-      "kind": "module",
-      "name": "Tuple\nfrom dataclasses import dataclass",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "Tuple\nfrom dataclasses import dataclass",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "id": "module:e0a80bb427ddda6f",
-      "kind": "module",
-      "name": "field\nfrom config import config",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "field\nfrom config import config",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
       "id": "module:05a73385f8915931",
       "kind": "module",
       "name": "__future__",
@@ -3931,6 +3724,42 @@
       ]
     },
     {
+      "id": "module:02d7d3475883e6dc",
+      "kind": "module",
+      "name": "typing",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "typing",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/analysis/pose_estimator.py"
+      ]
+    },
+    {
+      "id": "module:cebf61970d756b53",
+      "kind": "module",
+      "name": "dataclasses",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "dataclasses",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/analysis/pose_estimator.py"
+      ]
+    },
+    {
       "id": "module:3d2cb6e665fd511c",
       "kind": "module",
       "name": "mediapipe",
@@ -3942,6 +3771,24 @@
         "functions": [],
         "isEntry": false,
         "path": "mediapipe",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/analysis/pose_estimator.py"
+      ]
+    },
+    {
+      "id": "module:c41a2be51027c17d",
+      "kind": "module",
+      "name": "Tuple",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "Tuple",
         "external": true
       },
       "evidence": [
@@ -3967,6 +3814,24 @@
       ]
     },
     {
+      "id": "module:a1fffaaafb7cc996",
+      "kind": "module",
+      "name": "List",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "List",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/analysis/pose_estimator.py"
+      ]
+    },
+    {
       "id": "module:6caea8c90b132ad0",
       "kind": "module",
       "name": "Any\nfrom dataclasses import dataclass\n\nfrom config import config",
@@ -3982,24 +3847,6 @@
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/analysis/pose_estimator.py"
-      ]
-    },
-    {
-      "id": "module:7a488390a939c479",
-      "kind": "module",
-      "name": "math",
-      "properties": {
-        "role": "external",
-        "language": "python",
-        "exports": [],
-        "classes": [],
-        "functions": [],
-        "isEntry": false,
-        "path": "math",
-        "external": true
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
       ]
     },
     {
@@ -4057,6 +3904,42 @@
       ]
     },
     {
+      "id": "module:a65e1d3845cf3b10",
+      "kind": "module",
+      "name": "numpy",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "numpy",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/detection/detector.py"
+      ]
+    },
+    {
+      "id": "module:f010df488131c019",
+      "kind": "module",
+      "name": "Tuple\nfrom dataclasses import dataclass",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "Tuple\nfrom dataclasses import dataclass",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/detection/detector.py"
+      ]
+    },
+    {
       "id": "module:c1a104844b99df18",
       "kind": "module",
       "name": "scipy.optimize",
@@ -4093,6 +3976,24 @@
       ]
     },
     {
+      "id": "module:7c448bbc41f7feb6",
+      "kind": "module",
+      "name": "Optional\nfrom dataclasses import dataclass",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "Optional\nfrom dataclasses import dataclass",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/detection/tracker.py"
+      ]
+    },
+    {
       "id": "module:2362df7c049cd08c",
       "kind": "module",
       "name": "field\nfrom scipy.optimize import linear_sum_assignment\nfrom filterpy.kalman import KalmanFilter",
@@ -4108,6 +4009,168 @@
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/detection/tracker.py"
+      ]
+    },
+    {
+      "id": "module:fa4b9d69fdddc7c1",
+      "kind": "module",
+      "name": "collections",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "collections",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "id": "module:3778cac2029b3bb0",
+      "kind": "module",
+      "name": "analysis.scorer",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "analysis.scorer",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "id": "module:d039e7e5c04b73cd",
+      "kind": "module",
+      "name": "scipy.spatial",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "scipy.spatial",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "id": "module:98c38560c69c878d",
+      "kind": "module",
+      "name": "field\nfrom collections import defaultdict\nfrom scipy.spatial import Delaunay\nimport math\n\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "field\nfrom collections import defaultdict\nfrom scipy.spatial import Delaunay\nimport math\n\nfrom models.schemas import SeatMapping\nfrom detection.tracker import Track",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "id": "module:0c6c4102d4dfec3b",
+      "kind": "module",
+      "name": "Optional",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "Optional",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "id": "module:e0a80bb427ddda6f",
+      "kind": "module",
+      "name": "field\nfrom config import config",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "field\nfrom config import config",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "id": "module:8d34a1f2340044c9",
+      "kind": "module",
+      "name": "analysis.signals",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "analysis.signals",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/scorer.py"
+      ]
+    },
+    {
+      "id": "module:c46900610e2dca14",
+      "kind": "module",
+      "name": "analysis.baseline",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "analysis.baseline",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
+      ]
+    },
+    {
+      "id": "module:7a488390a939c479",
+      "kind": "module",
+      "name": "math",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "math",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
       ]
     },
     {
@@ -4489,6 +4552,42 @@
       ]
     },
     {
+      "id": "module:4b48c016d28cb4cf",
+      "kind": "module",
+      "name": "json\nfrom pathlib import Path\nfrom typing import Any",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "json\nfrom pathlib import Path\nfrom typing import Any",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/pipeline/processor.py"
+      ]
+    },
+    {
+      "id": "module:edf7ba04c6ff3881",
+      "kind": "module",
+      "name": "Optional\n\nfrom config import config\nfrom models.schemas import AnalysisRequest\n\nfrom pipeline.feature_extractor import FeatureExtractorPhase1\nfrom pipeline.phase2_scoring import Phase2Scoring\nfrom pipeline.video_visualizer import VideoVisualizer",
+      "properties": {
+        "role": "external",
+        "language": "python",
+        "exports": [],
+        "classes": [],
+        "functions": [],
+        "isEntry": false,
+        "path": "Optional\n\nfrom config import config\nfrom models.schemas import AnalysisRequest\n\nfrom pipeline.feature_extractor import FeatureExtractorPhase1\nfrom pipeline.phase2_scoring import Phase2Scoring\nfrom pipeline.video_visualizer import VideoVisualizer",
+        "external": true
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/pipeline/processor.py"
+      ]
+    },
+    {
       "id": "module:653401d685bbdeb8",
       "kind": "module",
       "name": "json\nfrom collections import defaultdict\nfrom dataclasses import dataclass\nfrom pathlib import Path\nfrom typing import Any",
@@ -4659,294 +4758,6 @@
       ]
     },
     {
-      "source": "module:ceeb3e20ed4e62eb",
-      "target": "module:02d7d3475883e6dc",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "source": "module:ceeb3e20ed4e62eb",
-      "target": "module:cebf61970d756b53",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "source": "module:ceeb3e20ed4e62eb",
-      "target": "module:fa4b9d69fdddc7c1",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "source": "module:ceeb3e20ed4e62eb",
-      "target": "module:f53a3def6a73a20a",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "source": "module:ceeb3e20ed4e62eb",
-      "target": "module:7fdca43f99908e8b",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/aggregator.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:02d7d3475883e6dc",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:cebf61970d756b53",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:fa4b9d69fdddc7c1",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:d039e7e5c04b73cd",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "schema:4f2e98ce2b9101ff",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:c709bfab66e7f51d",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:a65e1d3845cf3b10",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:a1fffaaafb7cc996",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:c41a2be51027c17d",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:7c448bbc41f7feb6",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:849813cf97cb0d15",
-      "target": "module:98c38560c69c878d",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/auto_discovery.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:02d7d3475883e6dc",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:cebf61970d756b53",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:7fdca43f99908e8b",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:a65e1d3845cf3b10",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:a1fffaaafb7cc996",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:0c6c4102d4dfec3b",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:f010df488131c019",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
-      "source": "module:474fabff5021d1ed",
-      "target": "module:e0a80bb427ddda6f",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/baseline.py"
-      ]
-    },
-    {
       "source": "module:744e78b82a60183c",
       "target": "module:05a73385f8915931",
       "relation": "imports",
@@ -5067,174 +4878,6 @@
       ]
     },
     {
-      "source": "module:f53a3def6a73a20a",
-      "target": "module:cebf61970d756b53",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/scorer.py"
-      ]
-    },
-    {
-      "source": "module:f53a3def6a73a20a",
-      "target": "module:02d7d3475883e6dc",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/scorer.py"
-      ]
-    },
-    {
-      "source": "module:f53a3def6a73a20a",
-      "target": "module:6df59850283b74d8",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/scorer.py"
-      ]
-    },
-    {
-      "source": "module:f53a3def6a73a20a",
-      "target": "module:7fdca43f99908e8b",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/scorer.py"
-      ]
-    },
-    {
-      "source": "module:f19722c2b3d2a8e1",
-      "target": "module:02d7d3475883e6dc",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/seat_assigner.py"
-      ]
-    },
-    {
-      "source": "module:f19722c2b3d2a8e1",
-      "target": "module:cebf61970d756b53",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/seat_assigner.py"
-      ]
-    },
-    {
-      "source": "module:f19722c2b3d2a8e1",
-      "target": "schema:4f2e98ce2b9101ff",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/seat_assigner.py"
-      ]
-    },
-    {
-      "source": "module:f19722c2b3d2a8e1",
-      "target": "module:c709bfab66e7f51d",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/seat_assigner.py"
-      ]
-    },
-    {
-      "source": "module:f19722c2b3d2a8e1",
-      "target": "module:7fdca43f99908e8b",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/seat_assigner.py"
-      ]
-    },
-    {
-      "source": "module:6df59850283b74d8",
-      "target": "module:02d7d3475883e6dc",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
-      ]
-    },
-    {
-      "source": "module:6df59850283b74d8",
-      "target": "module:cebf61970d756b53",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
-      ]
-    },
-    {
-      "source": "module:6df59850283b74d8",
-      "target": "module:474fabff5021d1ed",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
-      ]
-    },
-    {
-      "source": "module:6df59850283b74d8",
-      "target": "module:7fdca43f99908e8b",
-      "relation": "imports",
-      "properties": {
-        "confidence": "high",
-        "evidence_type": "ast"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
-      ]
-    },
-    {
-      "source": "module:6df59850283b74d8",
-      "target": "module:7a488390a939c479",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/analysis/signals.py"
-      ]
-    },
-    {
       "source": "module:7fdca43f99908e8b",
       "target": "module:cebf61970d756b53",
       "relation": "imports",
@@ -5268,6 +4911,18 @@
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/detection/__init__.py"
+      ]
+    },
+    {
+      "source": "module:ac8d9a0f9d3f3797",
+      "target": "module:4471f74a0ff584a8",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/detection/detector.py"
       ]
     },
     {
@@ -5320,19 +4975,7 @@
     },
     {
       "source": "module:ac8d9a0f9d3f3797",
-      "target": "module:c41a2be51027c17d",
-      "relation": "imports",
-      "properties": {
-        "confidence": "low",
-        "evidence_type": "import-string"
-      },
-      "evidence": [
-        "classroom-anticheat/python-cv-service/detection/detector.py"
-      ]
-    },
-    {
-      "source": "module:ac8d9a0f9d3f3797",
-      "target": "module:7c448bbc41f7feb6",
+      "target": "module:f010df488131c019",
       "relation": "imports",
       "properties": {
         "confidence": "low",
@@ -5448,6 +5091,462 @@
       },
       "evidence": [
         "classroom-anticheat/python-cv-service/detection/tracker.py"
+      ]
+    },
+    {
+      "source": "module:41fba60ac8d4199e",
+      "target": "module:02d7d3475883e6dc",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "source": "module:41fba60ac8d4199e",
+      "target": "module:cebf61970d756b53",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "source": "module:41fba60ac8d4199e",
+      "target": "module:fa4b9d69fdddc7c1",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "source": "module:41fba60ac8d4199e",
+      "target": "module:3778cac2029b3bb0",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "source": "module:41fba60ac8d4199e",
+      "target": "module:7fdca43f99908e8b",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/aggregator.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:02d7d3475883e6dc",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:cebf61970d756b53",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:fa4b9d69fdddc7c1",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:d039e7e5c04b73cd",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "schema:4f2e98ce2b9101ff",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:c709bfab66e7f51d",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:a65e1d3845cf3b10",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:a1fffaaafb7cc996",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:c41a2be51027c17d",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:7c448bbc41f7feb6",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:e8db01938b8e9684",
+      "target": "module:98c38560c69c878d",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/auto_discovery.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:02d7d3475883e6dc",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:cebf61970d756b53",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:7fdca43f99908e8b",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:a65e1d3845cf3b10",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:a1fffaaafb7cc996",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:0c6c4102d4dfec3b",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:f010df488131c019",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:cbc112d41005e84d",
+      "target": "module:e0a80bb427ddda6f",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/baseline.py"
+      ]
+    },
+    {
+      "source": "module:b8eebc9544da86d7",
+      "target": "module:cebf61970d756b53",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/scorer.py"
+      ]
+    },
+    {
+      "source": "module:b8eebc9544da86d7",
+      "target": "module:02d7d3475883e6dc",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/scorer.py"
+      ]
+    },
+    {
+      "source": "module:b8eebc9544da86d7",
+      "target": "module:8d34a1f2340044c9",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/scorer.py"
+      ]
+    },
+    {
+      "source": "module:b8eebc9544da86d7",
+      "target": "module:7fdca43f99908e8b",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/scorer.py"
+      ]
+    },
+    {
+      "source": "module:b255eb7fbdcbff11",
+      "target": "module:02d7d3475883e6dc",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/seat_assigner.py"
+      ]
+    },
+    {
+      "source": "module:b255eb7fbdcbff11",
+      "target": "module:cebf61970d756b53",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/seat_assigner.py"
+      ]
+    },
+    {
+      "source": "module:b255eb7fbdcbff11",
+      "target": "schema:4f2e98ce2b9101ff",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/seat_assigner.py"
+      ]
+    },
+    {
+      "source": "module:b255eb7fbdcbff11",
+      "target": "module:c709bfab66e7f51d",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/seat_assigner.py"
+      ]
+    },
+    {
+      "source": "module:b255eb7fbdcbff11",
+      "target": "module:7fdca43f99908e8b",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/seat_assigner.py"
+      ]
+    },
+    {
+      "source": "module:6d88859e47534395",
+      "target": "module:02d7d3475883e6dc",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
+      ]
+    },
+    {
+      "source": "module:6d88859e47534395",
+      "target": "module:cebf61970d756b53",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
+      ]
+    },
+    {
+      "source": "module:6d88859e47534395",
+      "target": "module:c46900610e2dca14",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
+      ]
+    },
+    {
+      "source": "module:6d88859e47534395",
+      "target": "module:7fdca43f99908e8b",
+      "relation": "imports",
+      "properties": {
+        "confidence": "high",
+        "evidence_type": "ast"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
+      ]
+    },
+    {
+      "source": "module:6d88859e47534395",
+      "target": "module:7a488390a939c479",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/legacy/signals.py"
       ]
     },
     {
@@ -6135,6 +6234,42 @@
       ]
     },
     {
+      "source": "module:d06c89409f94a125",
+      "target": "module:4b48c016d28cb4cf",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/pipeline/processor.py"
+      ]
+    },
+    {
+      "source": "module:d06c89409f94a125",
+      "target": "module:3550a4a38c380e14",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/pipeline/processor.py"
+      ]
+    },
+    {
+      "source": "module:d06c89409f94a125",
+      "target": "module:edf7ba04c6ff3881",
+      "relation": "imports",
+      "properties": {
+        "confidence": "low",
+        "evidence_type": "import-string"
+      },
+      "evidence": [
+        "classroom-anticheat/python-cv-service/pipeline/processor.py"
+      ]
+    },
+    {
       "source": "module:9396d18993e8b50f",
       "target": "module:05a73385f8915931",
       "relation": "imports",
@@ -6268,16 +6403,16 @@
     }
   ],
   "metadata": {
-    "generated_at": "2026-03-21T16:11:47.589Z",
+    "generated_at": "2026-03-21T16:38:49.208Z",
     "workspace_root": "/home/sanvict/Documents/Code/Java",
-    "node_count": 226,
-    "edge_count": 145,
+    "node_count": 231,
+    "edge_count": 148,
     "stack": "Python React FastAPI · styles: Tailwind CSS · imports: relative imports (e.g. ../components/Button)",
-    "file_hash": "21e101bc6bff40a7",
+    "file_hash": "7524508897f31910",
     "confidence_counts": {
-      "high": 35,
+      "high": 32,
       "medium": 0,
-      "low": 110
+      "low": 116
     }
   }
 }

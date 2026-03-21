@@ -1,0 +1,30 @@
+# Runtime artifacts
+job_store/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Java build
+target/
+*.class
+
+# Node / Frontend
+node_modules/
+dist/
+.env
+.env.local
+
+# Model weights (use Git LFS or download script instead)
+*.pt
+*.onnx
+
+# IDE / Tool metadata
+.architectiq/
+.idea/
+.vscode/
+*.iml
