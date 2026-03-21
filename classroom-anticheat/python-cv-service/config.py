@@ -91,11 +91,14 @@ class Config:
     SUSPICION_ENTER_THRESHOLD: float = 0.6
     SUSPICION_EXIT_THRESHOLD: float = 0.45
     MIN_INTERVAL_DURATION_SEC: float = 3.0
-    MIN_INTERVAL_AVG_CONFIDENCE: float = 0.45
+    MIN_INTERVAL_AVG_CONFIDENCE: float = 0.33
 
     # Phase 2 runtime weighting/threshold adaptation for real classroom footage
     MIN_CONFIDENCE_WEIGHT_FLOOR: float = 0.35
     EFFECTIVE_SCORE_CEILING: float = 0.5
+    # NOTE: This value documents the practical maximum observed score in real classroom footage.
+    # It is NOT used to scale detection thresholds. Thresholds are defined directly via
+    # SUSPICION_ENTER_THRESHOLD and SUSPICION_EXIT_THRESHOLD.
 
     # Phase 2 teacher/event suppression heuristics
     TEACHER_MIN_CUMULATIVE_TRAVEL_PX: float = 2000.0   # must satisfy BOTH conditions

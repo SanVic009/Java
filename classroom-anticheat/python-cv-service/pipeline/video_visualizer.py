@@ -29,6 +29,9 @@ class FrameAnn:
     dominant_signals: List[str]
     confidence_weight: float  # 0..1
     interval_peak_score: float
+    head_pose_confidence: float
+    yaw: float
+    pitch: float
 
 
 class VideoVisualizer:
@@ -130,6 +133,7 @@ class VideoVisualizer:
 
         # ---- Build sample bbox lookup from phase1_features.jsonl ----
         sample_bbox: DefaultDict[int, Dict[int, List[int]]] = defaultdict(dict)
+        sample_pose: DefaultDict[int, Dict[int, Dict[str, float]]] = defaultdict(dict)
         with phase1_features_path.open("r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -142,6 +146,12 @@ class VideoVisualizer:
                 if not bbox:
                     continue
                 sample_bbox[tid][frame_idx] = [int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])]
+                pose = rec.get("pose") or {}
+                sample_pose[tid][frame_idx] = {
+                    "head_pose_confidence": float(pose.get("head_pose_confidence", 0.0)),
+                    "yaw": float(pose.get("yaw", 0.0)),
+                    "pitch": float(pose.get("pitch", 0.0)),
+                }
 
         # Now that we have all tracks from Phase 1, update the timeline/annotation universe.
         all_track_ids_sorted = sorted(sample_bbox.keys())
@@ -185,6 +195,7 @@ class VideoVisualizer:
                 bbox = sample_bbox[tid][fi]
                 score, conf_w = sample_scores.get(tid, {}).get(fi, (0.0, 0.0))
                 ema = sample_ema.get(tid, {}).get(fi, 0.0)
+                pose = sample_pose.get(tid, {}).get(fi, {})
 
                 for f in range(fi, end_fill + 1):
                     ts = float(f) / fps
@@ -199,6 +210,9 @@ class VideoVisualizer:
                         dominant_signals=[str(x) for x in dominant],
                         confidence_weight=self._clamp(float(conf_w), 0.0, 1.0),
                         interval_peak_score=float(peak),
+                        head_pose_confidence=float(pose.get("head_pose_confidence", 0.0)),
+                        yaw=float(pose.get("yaw", 0.0)),
+                        pitch=float(pose.get("pitch", 0.0)),
                     )
                     key = (tid, f)
                     ann_lookup[key] = ann
@@ -259,6 +273,11 @@ class VideoVisualizer:
 
             # Score bar and confidence indicator.
             self._draw_score_bar_and_confidence(frame, ann, x1, y2, color, cfg)
+
+            if ann.head_pose_confidence >= 0.5:
+                self._draw_pose_overlay(frame, ann, x1, y1)
+            else:
+                self._draw_low_confidence_indicator(frame, ann.bbox, color=(128, 128, 128))
 
             # Checkbox panel when active.
             if ann.active:
@@ -374,4 +393,24 @@ class VideoVisualizer:
                 1,
                 cv2.LINE_AA,
             )
+
+    def _draw_pose_overlay(self, frame: np.ndarray, ann: FrameAnn, x1: int, y1: int):
+        """Draw compact yaw/pitch direction cue for reliable head pose."""
+        cx = x1 + 24
+        cy = max(16, y1 + 18)
+        yaw = float(np.clip(ann.yaw, -45.0, 45.0))
+        pitch = float(np.clip(ann.pitch, -30.0, 30.0))
+
+        dx = int(round((yaw / 45.0) * 18.0))
+        dy = int(round((pitch / 30.0) * 12.0))
+
+        cv2.circle(frame, (cx, cy), 2, (240, 240, 240), -1)
+        cv2.arrowedLine(frame, (cx, cy), (cx + dx, cy + dy), (0, 255, 255), 2, tipLength=0.3)
+
+    def _draw_low_confidence_indicator(self, frame: np.ndarray, bbox: List[int], color=(128, 128, 128)):
+        """Draw neutral marker when pose confidence is below rendering threshold."""
+        x1, y1, _, _ = bbox
+        cx = x1 + 24
+        cy = max(16, y1 + 18)
+        cv2.circle(frame, (cx, cy), 4, color, 1)
 

@@ -32,12 +32,54 @@ class Track:
     # Heuristic approximation: without ground truth, ID-switches are detected as
     # track fragmentation near recently-ended tracks.
     id_switch_count: int = 0
+
+    # Kalman filter state for simple constant-velocity box prediction.
+    kf: object = None
+
+    def __post_init__(self):
+        # State: [cx, cy, w, h, vx, vy, vw, vh]
+        kf = KalmanFilter(dim_x=8, dim_z=4)
+        kf.F = np.eye(8)
+        kf.F[0, 4] = 1.0
+        kf.F[1, 5] = 1.0
+        kf.F[2, 6] = 1.0
+        kf.F[3, 7] = 1.0
+        kf.H = np.eye(4, 8)
+        kf.R *= 10.0
+        kf.P[4:, 4:] *= 1000.0
+        kf.Q[4:, 4:] *= 0.1
+
+        x1, y1, x2, y2 = self.bbox
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+        w = float(x2 - x1)
+        h = float(y2 - y1)
+        kf.x[:4] = np.array([[cx], [cy], [w], [h]])
+        self.kf = kf
+
+    def predict(self) -> Tuple[int, int, int, int]:
+        """Return predicted bbox from Kalman filter."""
+        self.kf.predict()
+        cx = float(self.kf.x[0])
+        cy = float(self.kf.x[1])
+        w = max(float(self.kf.x[2]), 1.0)
+        h = max(float(self.kf.x[3]), 1.0)
+        x1 = int(cx - w / 2.0)
+        y1 = int(cy - h / 2.0)
+        x2 = int(cx + w / 2.0)
+        y2 = int(cy + h / 2.0)
+        return (x1, y1, x2, y2)
     
     def update(self, bbox: Tuple[int, int, int, int], confidence: float, frame_idx: int):
         """Update track with a new detection."""
         self.bbox = bbox
         x1, y1, x2, y2 = bbox
         self.centroid = ((x1 + x2) // 2, (y1 + y2) // 2)
+        cx = (x1 + x2) / 2.0
+        cy = (y1 + y2) / 2.0
+        w = float(x2 - x1)
+        h = float(y2 - y1)
+        self.kf.update(np.array([[cx], [cy], [w], [h]]))
         self.hits += 1
         self.visible_frames += 1
         self.time_since_update = 0
@@ -133,6 +175,7 @@ class ByteTracker:
         if not detections:
             # Mark all tracks as missed
             for track in self.tracks:
+                track.predict()
                 track.mark_missed(frame_idx)
             self._handle_lost_tracks()
             return self.tracks
@@ -140,17 +183,50 @@ class ByteTracker:
         # Separate high and low confidence detections
         high_dets = [d for d in detections if d.confidence >= self.track_thresh]
         low_dets = [d for d in detections if d.confidence < self.track_thresh]
+
+        predicted_bboxes = {track.track_id: track.predict() for track in self.tracks}
         
         # First association: high confidence detections with active tracks
         unmatched_tracks, unmatched_dets = self._associate(
-            self.tracks, high_dets
+            self.tracks, high_dets, predicted_bboxes=predicted_bboxes
         )
         
         # Second association: unmatched tracks with low confidence detections
         if unmatched_tracks and low_dets:
             remaining_tracks = [self.tracks[i] for i in unmatched_tracks]
-            still_unmatched, _ = self._associate(remaining_tracks, low_dets)
+            still_unmatched, _ = self._associate(
+                remaining_tracks,
+                low_dets,
+                predicted_bboxes=predicted_bboxes,
+            )
             unmatched_tracks = [unmatched_tracks[i] for i in still_unmatched]
+
+        # Third association pass: try to re-identify recently lost tracks.
+        REID_MAX_DISTANCE_PX = 80.0
+        REID_MAX_LOST_FRAMES = 15
+
+        if unmatched_dets and self.lost_tracks:
+            for det_idx in list(unmatched_dets):
+                det = high_dets[det_idx]
+                best_lost = None
+                best_dist = REID_MAX_DISTANCE_PX
+
+                for lost in self.lost_tracks:
+                    if lost.time_since_update > REID_MAX_LOST_FRAMES:
+                        continue
+                    dx = float(lost.centroid[0] - det.centroid[0])
+                    dy = float(lost.centroid[1] - det.centroid[1])
+                    dist = float(np.sqrt(dx * dx + dy * dy))
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_lost = lost
+
+                if best_lost is not None:
+                    best_lost.update(det.bbox, det.confidence, frame_idx)
+                    best_lost.time_since_update = 0
+                    self.tracks.append(best_lost)
+                    self.lost_tracks.remove(best_lost)
+                    unmatched_dets.remove(det_idx)
         
         # Handle unmatched tracks
         for idx in unmatched_tracks:
@@ -192,7 +268,8 @@ class ByteTracker:
     def _associate(
         self,
         tracks: List[Track],
-        detections: List['Detection']
+        detections: List['Detection'],
+        predicted_bboxes: Optional[Dict[int, Tuple[int, int, int, int]]] = None,
     ) -> Tuple[List[int], List[int]]:
         """
         Associate tracks with detections using IoU.
@@ -206,8 +283,13 @@ class ByteTracker:
         # Compute IoU matrix
         iou_matrix = np.zeros((len(tracks), len(detections)))
         for t, track in enumerate(tracks):
+            track_bbox = (
+                predicted_bboxes.get(track.track_id, track.bbox)
+                if predicted_bboxes is not None
+                else track.bbox
+            )
             for d, det in enumerate(detections):
-                iou_matrix[t, d] = self._compute_iou(track.bbox, det.bbox)
+                iou_matrix[t, d] = self._compute_iou(track_bbox, det.bbox)
         
         # Use Hungarian algorithm for optimal assignment
         row_indices, col_indices = linear_sum_assignment(-iou_matrix)

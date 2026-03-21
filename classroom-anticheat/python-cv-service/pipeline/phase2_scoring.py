@@ -138,9 +138,8 @@ class Phase2Scoring:
             min(0.6, max(0.0, 1.0 - (1.0 - alpha) * duration_ratio))
         )
 
-        score_ceiling_ratio = float(np.clip(float(config.EFFECTIVE_SCORE_CEILING) / 1.0, 0.0, 1.0))
-        adjusted_enter_th = float(np.clip(self.enter_th * score_ceiling_ratio, 0.0, 1.0))
-        adjusted_exit_th = float(np.clip(self.exit_th * score_ceiling_ratio, 0.0, 1.0))
+        adjusted_enter_th = float(config.SUSPICION_ENTER_THRESHOLD)
+        adjusted_exit_th = float(config.SUSPICION_EXIT_THRESHOLD)
 
         print(
             "[Phase2] Using scaled parameters "
@@ -342,6 +341,11 @@ class Phase2Scoring:
             avg_conf = float(interval.sum_confidence_weight / float(interval.frame_count))
             if avg_conf < self.min_interval_avg_confidence:
                 stats["intervals_discarded_confidence"] += 1
+                if "intervals_discarded_confidence_by_track" not in stats:
+                    stats["intervals_discarded_confidence_by_track"] = {}
+                stats["intervals_discarded_confidence_by_track"][str(tid)] = (
+                    stats["intervals_discarded_confidence_by_track"].get(str(tid), 0) + 1
+                )
                 return
 
             avg_score = float(interval.sum_score / float(interval.frame_count))
@@ -758,7 +762,7 @@ class Phase2Scoring:
                 merged_interval = {
                     "start": float(a["start"]),
                     "end": float(b["end"]),
-                    "duration": float(a["end"] - a["start"] + (b["end"] - b["start"])) if (a["end"] and b["end"]) else float(total_dur),
+                    "duration": float(b["end"]) - float(a["start"]),
                     "peak_score": float(max(a["peak_score"], b["peak_score"])),
                     "avg_score": float((float(a["avg_score"]) * fa + float(b["avg_score"]) * fb) / ftotal),
                     "confidence": float((float(a["confidence"]) * fa + float(b["confidence"]) * fb) / ftotal),

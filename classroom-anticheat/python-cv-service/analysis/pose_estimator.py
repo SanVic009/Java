@@ -67,11 +67,14 @@ class PoseEstimator:
             min_detection_confidence: Minimum detection confidence
         """
         self.mp_face_mesh = mp.solutions.face_mesh
+        self._frame_width: int = 0
+        self._frame_height: int = 0
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=max_faces,
+            static_image_mode=True,
             refine_landmarks=True,  # Enable iris landmarks
             min_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=0.5
+            min_tracking_confidence=min_detection_confidence
         )
 
         self.min_face_crop_px = int(getattr(config, "MIN_FACE_CROP_PX", 35))
@@ -108,6 +111,9 @@ class PoseEstimator:
         Returns:
             PoseEstimate or None if crop is invalid.
         """
+        self._frame_width = int(frame.shape[1])
+        self._frame_height = int(frame.shape[0])
+
         x1, y1, x2, y2 = bbox
         
         # Expand bbox slightly for better face detection
@@ -271,7 +277,7 @@ class PoseEstimator:
 
         # Haar fallback (no explicit confidence/keypoints from detector).
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        faces = self._haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=3, minSize=(20, 20))
+        faces = self._haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(25, 25))
         if len(faces) == 0:
             return None
         # Choose largest face candidate.
@@ -280,6 +286,8 @@ class PoseEstimator:
         y = int(max(0, y))
         fw = int(max(1, min(fw, w - x)))
         fh = int(max(1, min(fh, h - y)))
+        if fw / max(fh, 1) < 0.6 or fw / max(fh, 1) > 1.4:
+            return None
         return {
             "bbox": (x, y, fw, fh),
             "confidence": 0.55,
@@ -388,10 +396,10 @@ class PoseEstimator:
         size_conf = float(np.clip(min(bbox_w, bbox_h) / float(max(self.min_face_crop_px, 1) * 4), 0.0, 1.0))
         head_pose_confidence = float(np.clip(0.35 + 0.25 * detect_conf + 0.20 * size_conf, 0.0, 0.70))
         landmark_visibility = float(np.clip(0.50 + 0.20 * size_conf, 0.0, 0.75))
-        gaze_reliability = 0.55
+        gaze_reliability = 0.30
 
-        gaze_x = float(np.clip(yaw / 45.0, -1.0, 1.0))
-        gaze_y = float(np.clip(pitch / 35.0, -1.0, 1.0))
+        gaze_x = 0.0
+        gaze_y = 0.0
 
         confidence = self._combine_confidences(
             landmark_visibility,
@@ -529,8 +537,8 @@ class PoseEstimator:
         height: int
     ) -> Tuple[float, float, float, float]:
         """Estimate yaw, pitch, roll from image points."""
-        # Camera matrix (approximation)
-        focal_length = width
+        # Camera matrix approximation: use full-frame width as focal length.
+        focal_length = float(self._frame_width) if self._frame_width > 0 else float(width * 16)
         center = (width / 2, height / 2)
         camera_matrix = np.array([
             [focal_length, 0, center[0]],
@@ -562,6 +570,7 @@ class PoseEstimator:
         pitch = float(euler_angles[0])
         yaw = float(euler_angles[1])
         roll = float(euler_angles[2])
+        yaw = -yaw
         
         # Confidence based on reprojection error: smaller error => higher confidence.
         projected, _ = cv2.projectPoints(
