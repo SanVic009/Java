@@ -12,9 +12,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import torch
+# Allow loading YOLO models in PyTorch 2.6+ by adding safe globals
+try:
+    from ultralytics.nn.tasks import DetectionModel
+    if hasattr(torch.serialization, 'add_safe_globals'):
+        torch.serialization.add_safe_globals([DetectionModel])
+except ImportError:
+    pass
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from models import (
     AnalysisRequest,
@@ -42,13 +52,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount job storage for static access to annotated videos
+JOB_ROOT = Path(config.JOB_STORAGE_DIR)
+JOB_ROOT.mkdir(parents=True, exist_ok=True)
+app.mount("/static", StaticFiles(directory=config.JOB_STORAGE_DIR), name="static")
+
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(status="healthy", version="1.0.0")
-
-JOB_ROOT = Path(config.JOB_STORAGE_DIR)
 
 
 def _job_dir(job_id: str) -> Path:

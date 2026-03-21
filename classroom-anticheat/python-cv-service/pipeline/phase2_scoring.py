@@ -71,6 +71,20 @@ class Phase2Scoring:
         self.weight_gaze = float(config.WEIGHT_GAZE)
         self.weight_proximity = float(config.WEIGHT_PROXIMITY)
 
+    @staticmethod
+    def _load_video_duration_sec(features_jsonl_path: Path) -> float:
+        """
+        Load video duration from sibling Phase 1 stats file.
+        Returns 3600.0 when unavailable (reference exam duration).
+        """
+        phase1_stats_path = features_jsonl_path.parent / "phase1_stats.json"
+        try:
+            payload = json.loads(phase1_stats_path.read_text(encoding="utf-8"))
+            dur = float(payload.get("duration_sec", 0.0))
+            return dur if dur > 0.0 else 3600.0
+        except Exception:
+            return 3600.0
+
     def run(
         self,
         out_results_path: Path,
@@ -80,6 +94,42 @@ class Phase2Scoring:
         exam_id: Optional[str] = None,
         out_frame_scores_path: Optional[Path] = None,
     ) -> Dict[str, Any]:
+        # Duration-aware scaling for short clips.
+        duration_sec = self._load_video_duration_sec(features_jsonl_path)
+        duration_ratio = float(np.clip(duration_sec / 3600.0, 0.1, 1.0))
+
+        effective_min_lifespan_sec = max(
+            2.0, float(config.MIN_TRACK_LIFESPAN_SEC) * duration_ratio
+        )
+        effective_baseline_window_sec = max(
+            3.0, float(config.BASELINE_ROLLING_WINDOW_SEC) * duration_ratio
+        )
+        effective_min_baseline_samples = int(
+            max(3, round(float(config.MIN_BASELINE_SAMPLES) * duration_ratio))
+        )
+        effective_min_interval_duration_sec = max(
+            1.5, float(config.MIN_INTERVAL_DURATION_SEC) * duration_ratio
+        )
+        effective_alpha = float(
+            min(0.6, max(0.0, 1.0 - (1.0 - float(config.EMA_ALPHA)) * duration_ratio))
+        )
+
+        score_ceiling_ratio = float(np.clip(float(config.EFFECTIVE_SCORE_CEILING) / 1.0, 0.0, 1.0))
+        adjusted_enter_th = float(np.clip(self.enter_th * score_ceiling_ratio, 0.0, 1.0))
+        adjusted_exit_th = float(np.clip(self.exit_th * score_ceiling_ratio, 0.0, 1.0))
+
+        print(
+            "[Phase2] Using scaled parameters "
+            f"for duration={duration_sec:.2f}s (ratio={duration_ratio:.4f}): "
+            f"effective_min_lifespan={effective_min_lifespan_sec:.2f}s, "
+            f"effective_baseline_window={effective_baseline_window_sec:.2f}s, "
+            f"effective_min_baseline_samples={effective_min_baseline_samples}, "
+            f"effective_min_interval_duration={effective_min_interval_duration_sec:.2f}s, "
+            f"effective_alpha={effective_alpha:.3f}, "
+            f"raw_enter_th={self.enter_th:.3f}, raw_exit_th={self.exit_th:.3f}, "
+            f"adjusted_enter_th={adjusted_enter_th:.3f}, adjusted_exit_th={adjusted_exit_th:.3f}"
+        )
+
         track_meta_list = json.loads(track_meta_path.read_text(encoding="utf-8"))
         track_meta: Dict[int, Dict[str, Any]] = {int(t["track_id"]): t for t in track_meta_list}
 
@@ -93,15 +143,91 @@ class Phase2Scoring:
                 discarded_tracks += 1
                 track_discard_reasons[tid] = f"stability_score<{config.TRACK_STABILITY_MIN_SCORE}"
                 continue
-            if duration < float(config.MIN_TRACK_LIFESPAN_SEC):
+            if duration < float(effective_min_lifespan_sec):
                 discarded_tracks += 1
-                track_discard_reasons[tid] = f"total_visible_duration<{config.MIN_TRACK_LIFESPAN_SEC}"
+                track_discard_reasons[tid] = f"total_visible_duration<{effective_min_lifespan_sec:.2f}"
                 continue
             kept_tracks.add(tid)
 
+        def _centroid_from_bbox(bbox: List[float]) -> Tuple[float, float]:
+            x1, y1, x2, y2 = bbox
+            return (0.5 * (float(x1) + float(x2)), 0.5 * (float(y1) + float(y2)))
+
+        # Read Phase 1 features once (needed for teacher detection + timestamp-level suppressions).
+        with features_jsonl_path.open("r", encoding="utf-8") as f:
+            feature_records: List[Dict[str, Any]] = [json.loads(line) for line in f if line.strip()]
+
+        # Teacher detection among already kept tracks.
+        centroids_by_track: Dict[int, List[Tuple[float, float]]] = defaultdict(list)
+        for rec in feature_records:
+            tid = int(rec["track_id"])
+            if tid not in kept_tracks:
+                continue
+            bbox = rec.get("bbox")
+            if not bbox or len(bbox) != 4:
+                continue
+            centroids_by_track[tid].append(_centroid_from_bbox(bbox))
+
+        teacher_candidates: List[Tuple[int, float, float]] = []
+        for tid, pts in centroids_by_track.items():
+            if len(pts) < 2:
+                continue
+            travel = float(
+                sum(
+                    np.sqrt((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2)
+                    for i in range(1, len(pts))
+                )
+            )
+            xs = np.array([p[0] for p in pts], dtype=np.float64)
+            ys = np.array([p[1] for p in pts], dtype=np.float64)
+            spatial_var = float(np.var(xs) + np.var(ys))
+            if (
+                travel >= float(config.TEACHER_CUMULATIVE_TRAVEL_THRESHOLD)
+                and spatial_var >= float(config.TEACHER_SPATIAL_VARIANCE_THRESHOLD)
+            ):
+                teacher_candidates.append((tid, travel, spatial_var))
+
+        teacher_track_id: Optional[int] = None
+        teacher_travel = 0.0
+        teacher_spatial_variance = 0.0
+        if teacher_candidates:
+            teacher_track_id, teacher_travel, teacher_spatial_variance = max(
+                teacher_candidates,
+                key=lambda x: x[1] + x[2],
+            )
+            kept_tracks.discard(int(teacher_track_id))
+            track_discard_reasons[int(teacher_track_id)] = "teacher_track_excluded"
+            discarded_tracks += 1
+            print(
+                "[Phase2] Excluding teacher track: "
+                f"track_id={teacher_track_id}, cumulative_travel={teacher_travel:.2f}, "
+                f"spatial_variance={teacher_spatial_variance:.2f}"
+            )
+
+        # Teacher centroid by timestamp for proximity suppression.
+        teacher_centroid_by_ts: Dict[float, Tuple[float, float]] = {}
+        if teacher_track_id is not None:
+            for rec in feature_records:
+                if int(rec["track_id"]) != int(teacher_track_id):
+                    continue
+                bbox = rec.get("bbox")
+                if not bbox or len(bbox) != 4:
+                    continue
+                ts = float(rec["timestamp"])
+                teacher_centroid_by_ts[ts] = _centroid_from_bbox(bbox)
+
+        # Keep only non-teacher kept tracks; bucket by sampled timestamp.
+        records_by_ts: Dict[float, List[Dict[str, Any]]] = defaultdict(list)
+        for rec in feature_records:
+            tid = int(rec["track_id"])
+            if tid not in kept_tracks:
+                continue
+            ts = float(rec["timestamp"])
+            records_by_ts[ts].append(rec)
+
         # Rolling baseline per track (timestamp, value)
-        window_sec = float(config.BASELINE_ROLLING_WINDOW_SEC)
-        min_samples = int(config.MIN_BASELINE_SAMPLES)
+        window_sec = float(effective_baseline_window_sec)
+        min_samples = int(effective_min_baseline_samples)
 
         @dataclass
         class TrackState:
@@ -144,13 +270,18 @@ class Phase2Scoring:
         results_by_track: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
 
         stats: Dict[str, Any] = {
-            "total_feature_records": 0,
+            "total_feature_records": len(feature_records),
             "discarded_tracks": discarded_tracks,
             "kept_tracks": len(kept_tracks),
             "track_discard_reasons": {str(k): v for k, v in track_discard_reasons.items()},
+            "teacher_track_id": int(teacher_track_id) if teacher_track_id is not None else None,
+            "teacher_track_cumulative_travel": float(teacher_travel),
+            "teacher_track_spatial_variance": float(teacher_spatial_variance),
             "frames_pose_unavailable": 0,
             "frames_low_visibility": 0,
             "frames_baseline_not_ready": 0,
+            "frames_suppressed_whole_class_event": 0,
+            "frames_suppressed_teacher_proximity": 0,
             "intervals_created": 0,
             "intervals_discarded_confidence": 0,
             "intervals_discarded_duration": 0,
@@ -162,7 +293,7 @@ class Phase2Scoring:
 
         def _finalize_interval(tid: int, interval: IntervalAcc) -> None:
             duration = float(interval.end_time - interval.start_time)
-            if duration < self.min_interval_duration_sec:
+            if duration < float(effective_min_interval_duration_sec):
                 stats["intervals_discarded_duration"] += 1
                 return
             if interval.frame_count <= 0:
@@ -244,19 +375,18 @@ class Phase2Scoring:
             frame_scores_fp = out_frame_scores_path.open("w", encoding="utf-8")
 
         try:
-            with features_jsonl_path.open("r", encoding="utf-8") as f:
-                for line in f:
-                    if not line.strip():
-                        continue
-                    stats["total_feature_records"] += 1
-                    rec = json.loads(line)
+            sim_signal_th = float(config.SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD)
+            sim_min_tracks = int(config.SIMULTANEOUS_EVENT_MIN_TRACKS)
+            teacher_radius = float(config.TEACHER_PROXIMITY_SUPPRESSION_RADIUS)
 
+            for timestamp in sorted(records_by_ts.keys()):
+                frame_items: List[Dict[str, Any]] = []
+                recs = records_by_ts[timestamp]
+
+                # First pass for this timestamp: baseline/scoring per track (pre-suppression).
+                for rec in recs:
                     tid = int(rec["track_id"])
-                    if tid not in kept_tracks:
-                        continue
-
                     state = _ensure_state(tid)
-                    timestamp = float(rec["timestamp"])
 
                     pose = rec.get("pose")
                     quality = rec.get("quality", {})
@@ -272,12 +402,16 @@ class Phase2Scoring:
                     # Defaults for this frame (used everywhere, so keep defined).
                     raw_signal_score = 0.0
                     confidence_weight = 0.0
-                    final_score = 0.0
+                    final_score_pre = 0.0
                     head_signal = 0.0
                     gaze_signal = 0.0
                     proximity_signal = 0.0
                     head_dev_flag = 0
                     gaze_dev_flag = 0
+
+                    pose_conf = 0.0
+                    head_pose_conf = 0.0
+                    gaze_reliability = 0.0
 
                     # 1) Update rolling baselines if pose quality is sufficient.
                     if pose is None:
@@ -302,147 +436,202 @@ class Phase2Scoring:
                         if nearest_distance is not None:
                             state.baseline_dist.append((timestamp, nearest_distance))
 
-                # Prune rolling baselines.
-                _prune(state.baseline_yaw, timestamp)
-                _prune(state.baseline_gaze, timestamp)
-                _prune(state.baseline_dist, timestamp)
+                    # Prune rolling baselines.
+                    _prune(state.baseline_yaw, timestamp)
+                    _prune(state.baseline_gaze, timestamp)
+                    _prune(state.baseline_dist, timestamp)
 
-                baseline_yaw, baseline_gaze, baseline_dist = _baseline_values(state)
-                baseline_ready = baseline_yaw is not None and baseline_gaze is not None
+                    baseline_yaw, baseline_gaze, baseline_dist = _baseline_values(state)
+                    baseline_ready = baseline_yaw is not None and baseline_gaze is not None
 
-                # 2) Compute signals and confidence-weighted score when possible.
-                # (If baseline isn't ready or pose missing, score stays 0, but EMA still updates.)
-                if pose is not None and baseline_ready:
-                    # Use the same quality gates as baseline update to avoid over-scoring.
-                    pose_conf = float(pose.get("confidence", 0.0))
-                    head_pose_conf = float(pose.get("head_pose_confidence", 0.0))
-                    gaze_reliability = float(pose.get("gaze_reliability", 0.0))
-                    quality_ok = (
-                        visibility_score >= float(config.MIN_FRAME_VISIBILITY_SCORE)
-                        and pose_conf >= float(config.MIN_POSE_CONFIDENCE)
-                        and head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
-                        and gaze_reliability >= float(config.MIN_POSE_CONFIDENCE)
-                    )
+                    # 2) Compute signals and confidence-weighted score when possible.
+                    if pose is not None and baseline_ready:
+                        quality_ok = (
+                            visibility_score >= float(config.MIN_FRAME_VISIBILITY_SCORE)
+                            and pose_conf >= float(config.MIN_POSE_CONFIDENCE)
+                            and head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
+                            and gaze_reliability >= float(config.MIN_POSE_CONFIDENCE)
+                        )
 
-                    if not quality_ok:
-                        stats["frames_low_visibility"] += 1
+                        if not quality_ok:
+                            stats["frames_low_visibility"] += 1
+                        else:
+                            yaw = float(pose["yaw"])
+                            gaze_x = float(pose["gaze_x"])
+
+                            head_dev = abs(yaw - float(baseline_yaw))
+                            gaze_dev = abs(gaze_x - float(baseline_gaze))
+
+                            head_signal = _clamp(head_dev / float(config.HEAD_DEV_NORM_DEG), 0.0, 1.0)
+                            gaze_signal = _clamp(gaze_dev / float(config.GAZE_DEV_NORM), 0.0, 1.0)
+
+                            if baseline_dist is not None and nearest_distance is not None and baseline_dist > 0:
+                                threshold = float(baseline_dist) * float(config.PROXIMITY_DISTANCE_RATIO_THRESHOLD)
+                                if threshold > 1e-6 and nearest_distance <= threshold:
+                                    proximity_signal = _clamp((threshold - nearest_distance) / threshold, 0.0, 1.0)
+
+                            raw_signal_score = (
+                                self.weight_head * head_signal
+                                + self.weight_gaze * gaze_signal
+                                + self.weight_proximity * proximity_signal
+                            )
+
+                            occlusion_clarity = float(1.0 - occlusion_score)
+                            confidence_weight_mean = (
+                                0.4 * pose_conf
+                                + 0.3 * visibility_score
+                                + 0.2 * tracking_stability_score
+                                + 0.1 * occlusion_clarity
+                            )
+                            confidence_weight = _clamp(
+                                max(float(confidence_weight_mean), float(config.MIN_CONFIDENCE_WEIGHT_FLOOR)),
+                                0.0,
+                                1.0,
+                            )
+                            final_score_pre = raw_signal_score * confidence_weight
+
+                            head_dev_flag = 1 if head_signal >= 1.0 else 0
+                            gaze_dev_flag = 1 if gaze_signal >= 1.0 else 0
                     else:
-                        yaw = float(pose["yaw"])
-                        gaze_x = float(pose["gaze_x"])
+                        stats["frames_baseline_not_ready"] += 1
 
-                        head_dev = abs(yaw - float(baseline_yaw))
-                        gaze_dev = abs(gaze_x - float(baseline_gaze))
+                    bbox = rec.get("bbox")
+                    centroid = _centroid_from_bbox(bbox) if bbox and len(bbox) == 4 else None
 
-                        head_signal = _clamp(head_dev / float(config.HEAD_DEV_NORM_DEG), 0.0, 1.0)
-                        gaze_signal = _clamp(gaze_dev / float(config.GAZE_DEV_NORM), 0.0, 1.0)
-
-                        proximity_signal = 0.0
-                        if baseline_dist is not None and nearest_distance is not None and baseline_dist > 0:
-                            threshold = float(baseline_dist) * float(config.PROXIMITY_DISTANCE_RATIO_THRESHOLD)
-                            if threshold > 1e-6 and nearest_distance <= threshold:
-                                proximity_signal = _clamp((threshold - nearest_distance) / threshold, 0.0, 1.0)
-
-                        raw_signal_score = (
-                            self.weight_head * head_signal
-                            + self.weight_gaze * gaze_signal
-                            + self.weight_proximity * proximity_signal
-                        )
-
-                        occlusion_clarity = float(1.0 - occlusion_score)
-                        confidence_weight = _clamp(
-                            pose_conf
-                            * visibility_score
-                            * tracking_stability_score
-                            * occlusion_clarity,
-                            0.0,
-                            1.0,
-                        )
-                        final_score = raw_signal_score * confidence_weight
-
-                        head_dev_flag = 1 if head_signal >= 1.0 else 0
-                        gaze_dev_flag = 1 if gaze_signal >= 1.0 else 0
-                        stats["frames_pose_unavailable"] += 0  # no-op for explicitness
-                else:
-                    stats["frames_baseline_not_ready"] += 1
-
-                # 3) Update EMA always.
-                state.ema = self.alpha * float(final_score) + (1.0 - self.alpha) * float(state.ema)
-
-                # Persist per-frame scoring for audit/debugging.
-                if frame_scores_fp is not None:
-                    frame_scores_fp.write(
-                        json.dumps(
-                            {
-                                "timestamp": float(timestamp),
-                                "track_id": int(tid),
-                                "final_score": float(final_score),
-                                "raw_signal_score": float(raw_signal_score),
-                                "confidence_weight": float(confidence_weight),
-                                "head_signal": float(head_signal),
-                                "gaze_signal": float(gaze_signal),
-                                "proximity_signal": float(proximity_signal),
-                                "baseline_ready": bool(baseline_ready),
-                                "visibility_score": float(visibility_score),
-                                "occlusion_score": float(occlusion_score),
-                            }
-                        )
-                        + "\n"
+                    frame_items.append(
+                        {
+                            "tid": tid,
+                            "state": state,
+                            "timestamp": float(timestamp),
+                            "pose": pose,
+                            "nearest_distance": nearest_distance,
+                            "baseline_ready": bool(baseline_ready),
+                            "visibility_score": float(visibility_score),
+                            "occlusion_score": float(occlusion_score),
+                            "raw_signal_score": float(raw_signal_score),
+                            "confidence_weight": float(confidence_weight),
+                            "final_score_pre": float(final_score_pre),
+                            "head_signal": float(head_signal),
+                            "gaze_signal": float(gaze_signal),
+                            "proximity_signal": float(proximity_signal),
+                            "head_dev_flag": int(head_dev_flag),
+                            "gaze_dev_flag": int(gaze_dev_flag),
+                            "centroid": centroid,
+                            "suppressed_whole_class_event": False,
+                            "suppressed_teacher_proximity": False,
+                        }
                     )
 
-                # 4) Interval transitions + accumulation.
-                if state.interval_open and state.interval is not None:
-                    interval = state.interval
-                    interval.end_time = timestamp
-                    interval.frame_count += 1
-                    interval.sum_score += float(final_score)
-                    interval.peak_score = max(float(interval.peak_score), float(final_score))
-                    interval.sum_confidence_weight += float(confidence_weight)
+                # Whole-class simultaneous event suppression.
+                simultaneous_count = sum(
+                    1 for item in frame_items if float(item["raw_signal_score"]) > sim_signal_th
+                )
+                whole_class_event = simultaneous_count >= sim_min_tracks
+                if whole_class_event:
+                    for item in frame_items:
+                        item["suppressed_whole_class_event"] = True
+                        stats["frames_suppressed_whole_class_event"] += 1
 
-                    # Components/support only if we computed signals this frame.
-                    if pose is not None and baseline_ready and confidence_weight > 0.0:
-                        interval.head_signal_sum += float(head_signal)
-                        interval.gaze_signal_sum += float(gaze_signal)
-                        interval.proximity_signal_sum += float(proximity_signal)
-                        interval.component_sum_frames += 1
+                # Teacher proximity suppression.
+                teacher_centroid = teacher_centroid_by_ts.get(float(timestamp))
+                if teacher_centroid is not None:
+                    for item in frame_items:
+                        c = item.get("centroid")
+                        if c is None:
+                            continue
+                        d = float(np.sqrt((c[0] - teacher_centroid[0]) ** 2 + (c[1] - teacher_centroid[1]) ** 2))
+                        if d < teacher_radius:
+                            item["suppressed_teacher_proximity"] = True
+                            stats["frames_suppressed_teacher_proximity"] += 1
 
-                        interval.head_deviation_flag_count += int(head_dev_flag)
-                        interval.gaze_deviation_flag_count += int(gaze_dev_flag)
+                # Second pass for this timestamp: EMA + interval state machine using suppressed final score.
+                for item in frame_items:
+                    tid = int(item["tid"])
+                    state = item["state"]
+                    suppressed = bool(item["suppressed_whole_class_event"] or item["suppressed_teacher_proximity"])
+                    final_score = 0.0 if suppressed else float(item["final_score_pre"])
 
-                        if nearest_distance is not None:
-                            interval.proximity_distance_sum += float(nearest_distance)
-                            interval.proximity_distance_count += 1
-                            if interval.proximity_distance_min is None:
-                                interval.proximity_distance_min = float(nearest_distance)
-                            else:
-                                interval.proximity_distance_min = min(float(interval.proximity_distance_min), float(nearest_distance))
+                    # 3) Update EMA always.
+                    state.ema = effective_alpha * float(final_score) + (1.0 - effective_alpha) * float(state.ema)
 
-                    if state.ema <= self.exit_th:
-                        _finalize_interval(tid, interval)
-                        state.interval_open = False
-                        state.interval = None
+                    if frame_scores_fp is not None:
+                        frame_scores_fp.write(
+                            json.dumps(
+                                {
+                                    "timestamp": float(item["timestamp"]),
+                                    "track_id": int(tid),
+                                    "final_score": float(final_score),
+                                    "raw_signal_score": float(item["raw_signal_score"]),
+                                    "confidence_weight": float(item["confidence_weight"]),
+                                    "head_signal": float(item["head_signal"]),
+                                    "gaze_signal": float(item["gaze_signal"]),
+                                    "proximity_signal": float(item["proximity_signal"]),
+                                    "baseline_ready": bool(item["baseline_ready"]),
+                                    "visibility_score": float(item["visibility_score"]),
+                                    "occlusion_score": float(item["occlusion_score"]),
+                                    "suppressed_whole_class_event": bool(item["suppressed_whole_class_event"]),
+                                    "suppressed_teacher_proximity": bool(item["suppressed_teacher_proximity"]),
+                                }
+                            )
+                            + "\n"
+                        )
 
-                # Start new interval if not open.
-                if not state.interval_open and state.ema >= self.enter_th:
-                    state.interval_open = True
-                    state.interval = IntervalAcc(start_time=timestamp, end_time=timestamp)
-                    # Accumulate this frame as part of the interval.
-                    interval = state.interval
-                    interval.frame_count = 1
-                    interval.sum_score = float(final_score)
-                    interval.peak_score = max(float(interval.peak_score), float(final_score))
-                    interval.sum_confidence_weight = float(confidence_weight)
+                    include_for_interval = not suppressed
 
-                    if pose is not None and baseline_ready and confidence_weight > 0.0:
-                        interval.head_signal_sum = float(head_signal)
-                        interval.gaze_signal_sum = float(gaze_signal)
-                        interval.proximity_signal_sum = float(proximity_signal)
-                        interval.component_sum_frames = 1
-                        interval.head_deviation_flag_count = int(head_dev_flag)
-                        interval.gaze_deviation_flag_count = int(gaze_dev_flag)
-                        if nearest_distance is not None:
-                            interval.proximity_distance_sum = float(nearest_distance)
-                            interval.proximity_distance_count = 1
-                            interval.proximity_distance_min = float(nearest_distance)
+                    # 4) Interval transitions + accumulation.
+                    if state.interval_open and state.interval is not None:
+                        interval = state.interval
+                        interval.end_time = float(item["timestamp"])
+
+                        if include_for_interval:
+                            interval.frame_count += 1
+                            interval.sum_score += float(final_score)
+                            interval.peak_score = max(float(interval.peak_score), float(final_score))
+                            interval.sum_confidence_weight += float(item["confidence_weight"])
+
+                            if item["pose"] is not None and bool(item["baseline_ready"]) and float(item["confidence_weight"]) > 0.0:
+                                interval.head_signal_sum += float(item["head_signal"])
+                                interval.gaze_signal_sum += float(item["gaze_signal"])
+                                interval.proximity_signal_sum += float(item["proximity_signal"])
+                                interval.component_sum_frames += 1
+
+                                interval.head_deviation_flag_count += int(item["head_dev_flag"])
+                                interval.gaze_deviation_flag_count += int(item["gaze_dev_flag"])
+
+                                if item["nearest_distance"] is not None:
+                                    interval.proximity_distance_sum += float(item["nearest_distance"])
+                                    interval.proximity_distance_count += 1
+                                    if interval.proximity_distance_min is None:
+                                        interval.proximity_distance_min = float(item["nearest_distance"])
+                                    else:
+                                        interval.proximity_distance_min = min(float(interval.proximity_distance_min), float(item["nearest_distance"]))
+
+                        if state.ema <= adjusted_exit_th:
+                            _finalize_interval(tid, interval)
+                            state.interval_open = False
+                            state.interval = None
+
+                    if not state.interval_open and state.ema >= adjusted_enter_th:
+                        state.interval_open = True
+                        state.interval = IntervalAcc(start_time=float(item["timestamp"]), end_time=float(item["timestamp"]))
+                        interval = state.interval
+                        if include_for_interval:
+                            interval.frame_count = 1
+                            interval.sum_score = float(final_score)
+                            interval.peak_score = max(float(interval.peak_score), float(final_score))
+                            interval.sum_confidence_weight = float(item["confidence_weight"])
+
+                            if item["pose"] is not None and bool(item["baseline_ready"]) and float(item["confidence_weight"]) > 0.0:
+                                interval.head_signal_sum = float(item["head_signal"])
+                                interval.gaze_signal_sum = float(item["gaze_signal"])
+                                interval.proximity_signal_sum = float(item["proximity_signal"])
+                                interval.component_sum_frames = 1
+                                interval.head_deviation_flag_count = int(item["head_dev_flag"])
+                                interval.gaze_deviation_flag_count = int(item["gaze_dev_flag"])
+                                if item["nearest_distance"] is not None:
+                                    interval.proximity_distance_sum = float(item["nearest_distance"])
+                                    interval.proximity_distance_count = 1
+                                    interval.proximity_distance_min = float(item["nearest_distance"])
 
         finally:
             if frame_scores_fp is not None:

@@ -9,11 +9,11 @@ public class TrackResult {
     private int track_id;
     private double total_duration;
     private double stability_score;
-    private List<SuspicionInterval> intervals;
+    private List<SuspiciousInterval> intervals;
 
     public TrackResult() {}
 
-    public TrackResult(int track_id, double total_duration, double stability_score, List<SuspicionInterval> intervals) {
+    public TrackResult(int track_id, double total_duration, double stability_score, List<SuspiciousInterval> intervals) {
         this.track_id = track_id;
         this.total_duration = total_duration;
         this.stability_score = stability_score;
@@ -44,11 +44,11 @@ public class TrackResult {
         this.stability_score = stability_score;
     }
 
-    public List<SuspicionInterval> getIntervals() {
+    public List<SuspiciousInterval> getIntervals() {
         return intervals;
     }
 
-    public void setIntervals(List<SuspicionInterval> intervals) {
+    public void setIntervals(List<SuspiciousInterval> intervals) {
         this.intervals = intervals;
     }
 

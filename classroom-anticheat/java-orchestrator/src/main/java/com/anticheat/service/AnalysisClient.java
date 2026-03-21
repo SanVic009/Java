@@ -9,6 +9,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 /**
@@ -34,6 +35,7 @@ public class AnalysisClient {
         this.baseUrl = baseUrl;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(30))
+            .version(HttpClient.Version.HTTP_1_1)
                 .build();
         this.gson = new GsonBuilder()
                 .setPrettyPrinting()
@@ -53,13 +55,15 @@ public class AnalysisClient {
         System.out.println("Submitting analysis job to Python CV service...");
         System.out.println("Exam ID: " + request.getExamId());
         System.out.println("Video: " + request.getVideoPath());
+        System.out.println("Payload: " + requestJson);
 
         try {
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + ANALYZE_ENDPOINT))
                     .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
                     .timeout(DEFAULT_TIMEOUT)
-                    .POST(HttpRequest.BodyPublishers.ofString(requestJson))
+                .POST(HttpRequest.BodyPublishers.ofByteArray(requestJson.getBytes(StandardCharsets.UTF_8)))
                     .build();
 
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());

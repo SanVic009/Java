@@ -1,0 +1,569 @@
+[
+  {
+    "track_id": 1,
+    "start_time": 0.0,
+    "end_time": 6.0,
+    "total_visible_duration_sec": 6.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.8991329438030192
+  },
+  {
+    "track_id": 2,
+    "start_time": 0.0,
+    "end_time": 0.4,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6234214074081845
+  },
+  {
+    "track_id": 3,
+    "start_time": 0.0,
+    "end_time": 0.0,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5526103377342224
+  },
+  {
+    "track_id": 4,
+    "start_time": 0.0,
+    "end_time": 0.0,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5100693106651306
+  },
+  {
+    "track_id": 5,
+    "start_time": 0.4,
+    "end_time": 0.6,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5712288022041321
+  },
+  {
+    "track_id": 6,
+    "start_time": 0.4,
+    "end_time": 1.6,
+    "total_visible_duration_sec": 1.0,
+    "id_switch_count": 0,
+    "stability_score": 0.7142857142857143,
+    "avg_tracking_confidence": 0.5945981897910435
+  },
+  {
+    "track_id": 7,
+    "start_time": 2.2,
+    "end_time": 2.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5355775952339172
+  },
+  {
+    "track_id": 8,
+    "start_time": 3.2,
+    "end_time": 3.4,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6382606625556946
+  },
+  {
+    "track_id": 9,
+    "start_time": 3.4,
+    "end_time": 3.4,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5210309028625488
+  },
+  {
+    "track_id": 10,
+    "start_time": 4.2,
+    "end_time": 4.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6587657332420349
+  },
+  {
+    "track_id": 11,
+    "start_time": 4.2,
+    "end_time": 4.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.605135440826416
+  },
+  {
+    "track_id": 12,
+    "start_time": 4.6,
+    "end_time": 5.0,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5855283074908786
+  },
+  {
+    "track_id": 13,
+    "start_time": 4.8,
+    "end_time": 4.8,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6149197220802307
+  },
+  {
+    "track_id": 14,
+    "start_time": 4.8,
+    "end_time": 4.8,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5340415835380554
+  },
+  {
+    "track_id": 15,
+    "start_time": 5.0,
+    "end_time": 5.2,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.56267349421978
+  },
+  {
+    "track_id": 16,
+    "start_time": 5.2,
+    "end_time": 5.6,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6179017987516192
+  },
+  {
+    "track_id": 17,
+    "start_time": 5.2,
+    "end_time": 5.4,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.552162304520607
+  },
+  {
+    "track_id": 18,
+    "start_time": 5.4,
+    "end_time": 5.4,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6406071186065674
+  },
+  {
+    "track_id": 19,
+    "start_time": 5.6,
+    "end_time": 5.8,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6011189818382263
+  },
+  {
+    "track_id": 20,
+    "start_time": 5.6,
+    "end_time": 5.6,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5214338302612305
+  },
+  {
+    "track_id": 21,
+    "start_time": 5.8,
+    "end_time": 7.4,
+    "total_visible_duration_sec": 1.8,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6529641796015137
+  },
+  {
+    "track_id": 22,
+    "start_time": 5.8,
+    "end_time": 5.8,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5349648594856262
+  },
+  {
+    "track_id": 23,
+    "start_time": 6.2,
+    "end_time": 13.0,
+    "total_visible_duration_sec": 5.6,
+    "id_switch_count": 0,
+    "stability_score": 0.8,
+    "avg_tracking_confidence": 0.9112427896910062
+  },
+  {
+    "track_id": 24,
+    "start_time": 6.2,
+    "end_time": 6.4,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6947701424360275
+  },
+  {
+    "track_id": 25,
+    "start_time": 6.2,
+    "end_time": 6.4,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5324636250734329
+  },
+  {
+    "track_id": 26,
+    "start_time": 6.4,
+    "end_time": 7.6,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 0.42857142857142855,
+    "avg_tracking_confidence": 0.8917655017640856
+  },
+  {
+    "track_id": 27,
+    "start_time": 6.6,
+    "end_time": 7.2,
+    "total_visible_duration_sec": 0.8,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.8977655557294687
+  },
+  {
+    "track_id": 28,
+    "start_time": 7.2,
+    "end_time": 7.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5568546056747437
+  },
+  {
+    "track_id": 29,
+    "start_time": 7.2,
+    "end_time": 7.4,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5381996631622314
+  },
+  {
+    "track_id": 30,
+    "start_time": 7.6,
+    "end_time": 7.6,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5191473364830017
+  },
+  {
+    "track_id": 31,
+    "start_time": 7.8,
+    "end_time": 8.6,
+    "total_visible_duration_sec": 1.0,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6713597981135051
+  },
+  {
+    "track_id": 32,
+    "start_time": 7.8,
+    "end_time": 10.8,
+    "total_visible_duration_sec": 3.0,
+    "id_switch_count": 0,
+    "stability_score": 0.9375,
+    "avg_tracking_confidence": 0.6623160760413465
+  },
+  {
+    "track_id": 33,
+    "start_time": 7.8,
+    "end_time": 8.0,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5998361855745316
+  },
+  {
+    "track_id": 34,
+    "start_time": 7.8,
+    "end_time": 8.4,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 1,
+    "stability_score": 0.25,
+    "avg_tracking_confidence": 0.5237607210874557
+  },
+  {
+    "track_id": 35,
+    "start_time": 7.8,
+    "end_time": 7.8,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5051053166389465
+  },
+  {
+    "track_id": 36,
+    "start_time": 8.2,
+    "end_time": 8.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6928764581680298
+  },
+  {
+    "track_id": 37,
+    "start_time": 8.4,
+    "end_time": 12.2,
+    "total_visible_duration_sec": 3.6,
+    "id_switch_count": 0,
+    "stability_score": 0.9,
+    "avg_tracking_confidence": 0.7508974051299511
+  },
+  {
+    "track_id": 38,
+    "start_time": 8.6,
+    "end_time": 8.8,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6552087962627411
+  },
+  {
+    "track_id": 39,
+    "start_time": 8.6,
+    "end_time": 8.6,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 1,
+    "stability_score": 0.5,
+    "avg_tracking_confidence": 0.5512869954109192
+  },
+  {
+    "track_id": 40,
+    "start_time": 8.8,
+    "end_time": 9.0,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.667510062456131
+  },
+  {
+    "track_id": 41,
+    "start_time": 8.8,
+    "end_time": 9.0,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 1,
+    "stability_score": 0.5,
+    "avg_tracking_confidence": 0.5135340988636017
+  },
+  {
+    "track_id": 42,
+    "start_time": 9.2,
+    "end_time": 13.0,
+    "total_visible_duration_sec": 3.4,
+    "id_switch_count": 0,
+    "stability_score": 0.85,
+    "avg_tracking_confidence": 0.638566430027432
+  },
+  {
+    "track_id": 43,
+    "start_time": 9.2,
+    "end_time": 9.8,
+    "total_visible_duration_sec": 0.8,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6738267454008261
+  },
+  {
+    "track_id": 44,
+    "start_time": 9.4,
+    "end_time": 9.4,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 1,
+    "stability_score": 0.5,
+    "avg_tracking_confidence": 0.5075473785400391
+  },
+  {
+    "track_id": 45,
+    "start_time": 9.6,
+    "end_time": 9.6,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6831348538398743
+  },
+  {
+    "track_id": 46,
+    "start_time": 9.6,
+    "end_time": 9.6,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5132315158843994
+  },
+  {
+    "track_id": 47,
+    "start_time": 9.8,
+    "end_time": 9.8,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 1,
+    "stability_score": 0.5,
+    "avg_tracking_confidence": 0.5184615254402161
+  },
+  {
+    "track_id": 48,
+    "start_time": 10.0,
+    "end_time": 10.0,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 1,
+    "stability_score": 0.5,
+    "avg_tracking_confidence": 0.5459300875663757
+  },
+  {
+    "track_id": 49,
+    "start_time": 10.2,
+    "end_time": 10.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5565950870513916
+  },
+  {
+    "track_id": 50,
+    "start_time": 10.4,
+    "end_time": 11.0,
+    "total_visible_duration_sec": 0.8,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6087613912920157
+  },
+  {
+    "track_id": 51,
+    "start_time": 10.4,
+    "end_time": 11.0,
+    "total_visible_duration_sec": 0.8,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5402446401615938
+  },
+  {
+    "track_id": 52,
+    "start_time": 11.0,
+    "end_time": 11.4,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.7165795697106255
+  },
+  {
+    "track_id": 53,
+    "start_time": 11.2,
+    "end_time": 11.2,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5448973178863525
+  },
+  {
+    "track_id": 54,
+    "start_time": 11.4,
+    "end_time": 11.4,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.6071968674659729
+  },
+  {
+    "track_id": 55,
+    "start_time": 11.4,
+    "end_time": 11.4,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5346754789352417
+  },
+  {
+    "track_id": 56,
+    "start_time": 11.6,
+    "end_time": 12.4,
+    "total_visible_duration_sec": 0.8,
+    "id_switch_count": 1,
+    "stability_score": 0.4,
+    "avg_tracking_confidence": 0.728450191517671
+  },
+  {
+    "track_id": 57,
+    "start_time": 11.6,
+    "end_time": 13.0,
+    "total_visible_duration_sec": 1.0,
+    "id_switch_count": 1,
+    "stability_score": 0.3125,
+    "avg_tracking_confidence": 0.6264700013399124
+  },
+  {
+    "track_id": 58,
+    "start_time": 11.8,
+    "end_time": 13.0,
+    "total_visible_duration_sec": 1.2,
+    "id_switch_count": 1,
+    "stability_score": 0.42857142857142855,
+    "avg_tracking_confidence": 0.7581153649422858
+  },
+  {
+    "track_id": 59,
+    "start_time": 12.2,
+    "end_time": 12.8,
+    "total_visible_duration_sec": 0.8,
+    "id_switch_count": 1,
+    "stability_score": 0.5,
+    "avg_tracking_confidence": 0.6093267202377319
+  },
+  {
+    "track_id": 60,
+    "start_time": 12.2,
+    "end_time": 12.6,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5621635086006589
+  },
+  {
+    "track_id": 61,
+    "start_time": 12.6,
+    "end_time": 13.0,
+    "total_visible_duration_sec": 0.6,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.7218769424491458
+  },
+  {
+    "track_id": 62,
+    "start_time": 12.6,
+    "end_time": 12.8,
+    "total_visible_duration_sec": 0.4,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5181849151849747
+  },
+  {
+    "track_id": 63,
+    "start_time": 12.8,
+    "end_time": 12.8,
+    "total_visible_duration_sec": 0.2,
+    "id_switch_count": 0,
+    "stability_score": 1.0,
+    "avg_tracking_confidence": 0.5729688405990601
+  }
+]

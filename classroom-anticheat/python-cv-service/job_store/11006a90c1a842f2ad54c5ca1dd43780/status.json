@@ -1,0 +1,7 @@
+{
+  "job_id": "11006a90c1a842f2ad54c5ca1dd43780",
+  "status": "failed",
+  "progress": 0.0,
+  "message": "cannot access local variable 'state' where it is not associated with a value",
+  "updated_at": "2026-03-21T04:19:47.886120+00:00"
+}

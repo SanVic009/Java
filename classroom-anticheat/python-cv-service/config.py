@@ -38,6 +38,14 @@ class Config:
     
     # Detection confidence
     YOLO_CONFIDENCE: float = 0.5
+    MIN_DETECTION_CONFIDENCE: float = 0.60
+    NMS_IOU_THRESHOLD: float = 0.30
+    MIN_PERSON_BOX_AREA: float = 2500.0
+    MIN_PERSON_ASPECT_RATIO: float = 1.1
+    MAX_PERSON_ASPECT_RATIO: float = 4.5
+
+    # Pose estimator pre-gate (do not run face landmarks for tiny faces)
+    MIN_FACE_CROP_PX: int = 35
     
     # Server
     HOST: str = "0.0.0.0"
@@ -65,6 +73,17 @@ class Config:
     SUSPICION_EXIT_THRESHOLD: float = 0.45
     MIN_INTERVAL_DURATION_SEC: float = 3.0
     MIN_INTERVAL_AVG_CONFIDENCE: float = 0.45
+
+    # Phase 2 runtime weighting/threshold adaptation for real classroom footage
+    MIN_CONFIDENCE_WEIGHT_FLOOR: float = 0.35
+    EFFECTIVE_SCORE_CEILING: float = 0.5
+
+    # Phase 2 teacher/event suppression heuristics
+    TEACHER_CUMULATIVE_TRAVEL_THRESHOLD: float = 2000.0
+    TEACHER_SPATIAL_VARIANCE_THRESHOLD: float = 15000.0
+    SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD: float = 0.25
+    SIMULTANEOUS_EVENT_MIN_TRACKS: int = 4
+    TEACHER_PROXIMITY_SUPPRESSION_RADIUS: float = 120.0
 
     # ID switch observability (heuristic; without ground truth it is an approximation)
     ID_SWITCH_DISTANCE_PX: float = 60.0

@@ -72,7 +72,7 @@ class FeatureExtractorPhase1:
         """
         Run Phase 1 feature extraction and persist results to disk.
         """
-        video = Path(video_path)
+        video = self._resolve_video_path(video_path)
         if not video.exists():
             raise FileNotFoundError(f"Video not found: {video}")
 
@@ -186,7 +186,11 @@ class FeatureExtractorPhase1:
                             visibility_score = 0.0
                             if is_visible:
                                 stats["pose_frames_attempted"] += 1
-                                pose = self.pose_estimator.estimate(frame, track.bbox)
+                                pose = self.pose_estimator.estimate(
+                                    frame,
+                                    track.bbox,
+                                    detection_confidence=det_conf,
+                                )
                                 if pose is not None:
                                     stats["pose_frames_succeeded"] += 1
                                     stats["avg_pose_confidence_sum"] += float(pose.confidence)
@@ -204,6 +208,11 @@ class FeatureExtractorPhase1:
                                         "gaze_reliability": pose.gaze_reliability,
                                         "confidence": pose.confidence,
                                         "pose_keypoints_2d": pose.pose_keypoints_2d,
+                                        "face_visible": pose.face_visible,
+                                        "estimation_mode": pose.estimation_mode,
+                                        "face_detect_confidence": pose.face_detect_confidence,
+                                        "bbox_aspect_ratio": pose.bbox_aspect_ratio,
+                                        "bbox_orientation_deg": pose.bbox_orientation_deg,
                                     }
 
                             # Proximity features: nearest visible neighbor distance.
@@ -348,4 +357,37 @@ class FeatureExtractorPhase1:
         out_phase1_stats_path.write_text(json.dumps(stats, indent=2), encoding="utf-8")
 
         return stats
+
+    @staticmethod
+    def _resolve_video_path(video_path: str) -> Path:
+        """
+        Resolve a video path from common locations used by this workspace.
+        """
+        raw = Path(video_path).expanduser()
+        service_root = Path(__file__).resolve().parents[1]  # python-cv-service
+        project_root = service_root.parent
+
+        candidates: List[Path] = []
+        if raw.is_absolute():
+            candidates.append(raw)
+        else:
+            candidates.extend(
+                [
+                    raw,
+                    Path.cwd() / raw,
+                    service_root / raw,
+                    project_root / raw,
+                    project_root / "java-orchestrator" / "videos" / raw,
+                    project_root / "java-orchestrator" / "videos" / raw.name,
+                    project_root / "videos" / raw,
+                    project_root / "videos" / raw.name,
+                ]
+            )
+
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate.resolve()
+
+        checked = "\n".join(f"- {str(p)}" for p in candidates)
+        raise FileNotFoundError(f"Video not found: {video_path}. Checked:\n{checked}")
 

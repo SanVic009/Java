@@ -1,0 +1,380 @@
+{
+  "exam_id": "33",
+  "results": [
+    {
+      "track_id": 1,
+      "total_duration": 21.2,
+      "stability_score": 1.0,
+      "intervals": []
+    },
+    {
+      "track_id": 2,
+      "total_duration": 18.0,
+      "stability_score": 0.989010989010989,
+      "intervals": []
+    },
+    {
+      "track_id": 3,
+      "total_duration": 8.2,
+      "stability_score": 1.0,
+      "intervals": [
+        {
+          "start": 1.8,
+          "end": 3.4,
+          "duration": 1.5999999999999999,
+          "peak_score": 0.536011849512257,
+          "avg_score": 0.3766886390114293,
+          "confidence": 0.8897380329503394,
+          "dominant_signals": [
+            "GazeDeviation",
+            "HeadDeviation"
+          ],
+          "supporting_stats": {
+            "head_deviation_pct": 0.1111111111111111,
+            "gaze_deviation_pct": 0.7777777777777778,
+            "proximity_avg_distance": 86.00038964726764,
+            "proximity_min_distance": 80.8084154033477
+          }
+        }
+      ]
+    },
+    {
+      "track_id": 4,
+      "total_duration": 15.8,
+      "stability_score": 0.9404761904761905,
+      "intervals": []
+    },
+    {
+      "track_id": 5,
+      "total_duration": 2.8,
+      "stability_score": 1.0,
+      "intervals": []
+    },
+    {
+      "track_id": 6,
+      "total_duration": 7.6,
+      "stability_score": 1.0,
+      "intervals": [
+        {
+          "start": 4.4,
+          "end": 6.0,
+          "duration": 1.5999999999999996,
+          "peak_score": 0.416845623245333,
+          "avg_score": 0.33801985983129856,
+          "confidence": 0.6924969447442015,
+          "dominant_signals": [
+            "GazeDeviation",
+            "HeadDeviation"
+          ],
+          "supporting_stats": {
+            "head_deviation_pct": 0.5555555555555556,
+            "gaze_deviation_pct": 0.7777777777777778,
+            "proximity_avg_distance": 85.83540542458977,
+            "proximity_min_distance": 79.71198153351854
+          }
+        }
+      ]
+    },
+    {
+      "track_id": 7,
+      "total_duration": 3.8,
+      "stability_score": 0.4634146341463415,
+      "intervals": []
+    },
+    {
+      "track_id": 8,
+      "total_duration": 20.4,
+      "stability_score": 0.9622641509433962,
+      "intervals": []
+    },
+    {
+      "track_id": 9,
+      "total_duration": 15.8,
+      "stability_score": 0.79,
+      "intervals": []
+    },
+    {
+      "track_id": 12,
+      "total_duration": 11.8,
+      "stability_score": 0.6276595744680851,
+      "intervals": []
+    },
+    {
+      "track_id": 15,
+      "total_duration": 5.2,
+      "stability_score": 0.5,
+      "intervals": []
+    },
+    {
+      "track_id": 16,
+      "total_duration": 3.4,
+      "stability_score": 0.85,
+      "intervals": []
+    },
+    {
+      "track_id": 19,
+      "total_duration": 13.6,
+      "stability_score": 0.7727272727272727,
+      "intervals": []
+    },
+    {
+      "track_id": 27,
+      "total_duration": 2.2,
+      "stability_score": 0.4782608695652174,
+      "intervals": []
+    },
+    {
+      "track_id": 28,
+      "total_duration": 5.8,
+      "stability_score": 0.725,
+      "intervals": []
+    },
+    {
+      "track_id": 29,
+      "total_duration": 4.2,
+      "stability_score": 0.84,
+      "intervals": []
+    },
+    {
+      "track_id": 33,
+      "total_duration": 3.2,
+      "stability_score": 0.8421052631578947,
+      "intervals": []
+    },
+    {
+      "track_id": 37,
+      "total_duration": 10.0,
+      "stability_score": 0.5,
+      "intervals": []
+    },
+    {
+      "track_id": 38,
+      "total_duration": 9.6,
+      "stability_score": 0.7741935483870968,
+      "intervals": []
+    },
+    {
+      "track_id": 39,
+      "total_duration": 6.4,
+      "stability_score": 0.47058823529411764,
+      "intervals": []
+    },
+    {
+      "track_id": 40,
+      "total_duration": 3.0,
+      "stability_score": 0.5769230769230769,
+      "intervals": []
+    },
+    {
+      "track_id": 44,
+      "total_duration": 9.2,
+      "stability_score": 0.8846153846153846,
+      "intervals": []
+    },
+    {
+      "track_id": 45,
+      "total_duration": 3.2,
+      "stability_score": 0.5,
+      "intervals": []
+    },
+    {
+      "track_id": 64,
+      "total_duration": 3.2,
+      "stability_score": 1.0,
+      "intervals": []
+    },
+    {
+      "track_id": 70,
+      "total_duration": 2.0,
+      "stability_score": 1.0,
+      "intervals": []
+    }
+  ],
+  "observability": {
+    "total_feature_records": 3121,
+    "discarded_tracks": 55,
+    "kept_tracks": 25,
+    "track_discard_reasons": {
+      "10": "stability_score<0.45",
+      "11": "total_visible_duration<2.00",
+      "13": "total_visible_duration<2.00",
+      "14": "stability_score<0.45",
+      "17": "total_visible_duration<2.00",
+      "18": "total_visible_duration<2.00",
+      "20": "stability_score<0.45",
+      "21": "total_visible_duration<2.00",
+      "22": "total_visible_duration<2.00",
+      "23": "total_visible_duration<2.00",
+      "24": "total_visible_duration<2.00",
+      "25": "total_visible_duration<2.00",
+      "26": "total_visible_duration<2.00",
+      "30": "total_visible_duration<2.00",
+      "31": "total_visible_duration<2.00",
+      "32": "total_visible_duration<2.00",
+      "34": "total_visible_duration<2.00",
+      "35": "total_visible_duration<2.00",
+      "36": "total_visible_duration<2.00",
+      "41": "total_visible_duration<2.00",
+      "42": "total_visible_duration<2.00",
+      "43": "stability_score<0.45",
+      "46": "stability_score<0.45",
+      "47": "total_visible_duration<2.00",
+      "48": "stability_score<0.45",
+      "49": "stability_score<0.45",
+      "50": "stability_score<0.45",
+      "51": "stability_score<0.45",
+      "52": "total_visible_duration<2.00",
+      "53": "total_visible_duration<2.00",
+      "54": "total_visible_duration<2.00",
+      "55": "total_visible_duration<2.00",
+      "56": "total_visible_duration<2.00",
+      "57": "total_visible_duration<2.00",
+      "58": "total_visible_duration<2.00",
+      "59": "total_visible_duration<2.00",
+      "60": "total_visible_duration<2.00",
+      "61": "total_visible_duration<2.00",
+      "62": "stability_score<0.45",
+      "63": "total_visible_duration<2.00",
+      "65": "total_visible_duration<2.00",
+      "66": "total_visible_duration<2.00",
+      "67": "stability_score<0.45",
+      "68": "total_visible_duration<2.00",
+      "69": "total_visible_duration<2.00",
+      "71": "stability_score<0.45",
+      "72": "total_visible_duration<2.00",
+      "73": "total_visible_duration<2.00",
+      "74": "total_visible_duration<2.00",
+      "75": "stability_score<0.45",
+      "76": "total_visible_duration<2.00",
+      "77": "total_visible_duration<2.00",
+      "78": "total_visible_duration<2.00",
+      "79": "total_visible_duration<2.00",
+      "80": "total_visible_duration<2.00"
+    },
+    "teacher_track_id": null,
+    "teacher_track_cumulative_travel": 0.0,
+    "teacher_track_spatial_variance": 0.0,
+    "frames_pose_unavailable": 659,
+    "frames_low_visibility": 700,
+    "frames_baseline_not_ready": 720,
+    "frames_suppressed_whole_class_event": 224,
+    "frames_suppressed_teacher_proximity": 0,
+    "intervals_created": 2,
+    "intervals_discarded_confidence": 0,
+    "intervals_discarded_duration": 20,
+    "intervals_discarded_empty": 0,
+    "tracking_id_switch_count_total": 3,
+    "phase1": {
+      "exam_id": "33",
+      "video_path": "/home/sanvict/Documents/Code/Java/classroom-anticheat/java-orchestrator/videos/106705-673786412_small.mp4",
+      "original_fps": 25.0,
+      "total_frames": 529,
+      "duration_sec": 21.16,
+      "fps_sampling": 5,
+      "frame_skip": 5,
+      "sampled_frames_estimate": 105,
+      "frames_read": 529,
+      "frames_sampled": 106,
+      "frames_skipped": 423,
+      "frames_with_any_detection": 106,
+      "detections_per_sample_frame_sum": 1271.0,
+      "pose_frames_attempted": 1271,
+      "pose_frames_succeeded": 1271,
+      "avg_pose_confidence_sum": 787.0862431444776,
+      "avg_pose_landmark_visibility_sum": 950.7764285714352,
+      "avg_detection_confidence_sum": 77.86517381642686,
+      "avg_tracking_confidence_sum": 0.0,
+      "tracking_id_switch_events": 28,
+      "records_written": 3121,
+      "detections_per_sample_frame_avg": 11.99056603773585,
+      "pose_success_rate": 1.0,
+      "avg_pose_confidence": 0.6192653368563947,
+      "avg_pose_landmark_visibility": 0.7480538383724903
+    },
+    "phase2": {
+      "total_feature_records": 3121,
+      "discarded_tracks": 55,
+      "kept_tracks": 25,
+      "track_discard_reasons": {
+        "10": "stability_score<0.45",
+        "11": "total_visible_duration<2.00",
+        "13": "total_visible_duration<2.00",
+        "14": "stability_score<0.45",
+        "17": "total_visible_duration<2.00",
+        "18": "total_visible_duration<2.00",
+        "20": "stability_score<0.45",
+        "21": "total_visible_duration<2.00",
+        "22": "total_visible_duration<2.00",
+        "23": "total_visible_duration<2.00",
+        "24": "total_visible_duration<2.00",
+        "25": "total_visible_duration<2.00",
+        "26": "total_visible_duration<2.00",
+        "30": "total_visible_duration<2.00",
+        "31": "total_visible_duration<2.00",
+        "32": "total_visible_duration<2.00",
+        "34": "total_visible_duration<2.00",
+        "35": "total_visible_duration<2.00",
+        "36": "total_visible_duration<2.00",
+        "41": "total_visible_duration<2.00",
+        "42": "total_visible_duration<2.00",
+        "43": "stability_score<0.45",
+        "46": "stability_score<0.45",
+        "47": "total_visible_duration<2.00",
+        "48": "stability_score<0.45",
+        "49": "stability_score<0.45",
+        "50": "stability_score<0.45",
+        "51": "stability_score<0.45",
+        "52": "total_visible_duration<2.00",
+        "53": "total_visible_duration<2.00",
+        "54": "total_visible_duration<2.00",
+        "55": "total_visible_duration<2.00",
+        "56": "total_visible_duration<2.00",
+        "57": "total_visible_duration<2.00",
+        "58": "total_visible_duration<2.00",
+        "59": "total_visible_duration<2.00",
+        "60": "total_visible_duration<2.00",
+        "61": "total_visible_duration<2.00",
+        "62": "stability_score<0.45",
+        "63": "total_visible_duration<2.00",
+        "65": "total_visible_duration<2.00",
+        "66": "total_visible_duration<2.00",
+        "67": "stability_score<0.45",
+        "68": "total_visible_duration<2.00",
+        "69": "total_visible_duration<2.00",
+        "71": "stability_score<0.45",
+        "72": "total_visible_duration<2.00",
+        "73": "total_visible_duration<2.00",
+        "74": "total_visible_duration<2.00",
+        "75": "stability_score<0.45",
+        "76": "total_visible_duration<2.00",
+        "77": "total_visible_duration<2.00",
+        "78": "total_visible_duration<2.00",
+        "79": "total_visible_duration<2.00",
+        "80": "total_visible_duration<2.00"
+      },
+      "teacher_track_id": null,
+      "teacher_track_cumulative_travel": 0.0,
+      "teacher_track_spatial_variance": 0.0,
+      "frames_pose_unavailable": 659,
+      "frames_low_visibility": 700,
+      "frames_baseline_not_ready": 720,
+      "frames_suppressed_whole_class_event": 224,
+      "frames_suppressed_teacher_proximity": 0,
+      "intervals_created": 2,
+      "intervals_discarded_confidence": 0,
+      "intervals_discarded_duration": 20,
+      "intervals_discarded_empty": 0,
+      "tracking_id_switch_count_total": 3
+    }
+  },
+  "annotated_video": {
+    "file_path": "job_store/2cc3cf1464fa42a29425f0c6ed10cac4/phase2_annotated.mp4",
+    "status": "ready",
+    "resolution": {
+      "width": 960,
+      "height": 540
+    },
+    "frame_rate": 25.0,
+    "duration_sec": 21.16
+  }
+}
