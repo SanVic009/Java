@@ -17,7 +17,10 @@ import java.time.Duration;
 public class AnalysisClient {
     private static final String DEFAULT_BASE_URL = "http://localhost:8000";
     private static final String ANALYZE_ENDPOINT = "/analyze";
+    private static final String STATUS_ENDPOINT_PREFIX = "/status/";
+    private static final String RESULT_ENDPOINT_PREFIX = "/result/";
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(30); // Long timeout for video processing
+    private static final Duration POLL_INTERVAL = Duration.ofSeconds(2);
 
     private final String baseUrl;
     private final HttpClient httpClient;
@@ -44,13 +47,12 @@ public class AnalysisClient {
      * @return Analysis response with suspicious intervals
      * @throws AnalysisException if the request fails
      */
-    public AnalysisResponse analyze(ExamRequest request) throws AnalysisException {
+    public String submitAnalysis(ExamRequest request) throws AnalysisException {
         String requestJson = gson.toJson(request);
-        
-        System.out.println("Sending analysis request to Python CV service...");
+
+        System.out.println("Submitting analysis job to Python CV service...");
         System.out.println("Exam ID: " + request.getExamId());
         System.out.println("Video: " + request.getVideoPath());
-        System.out.println("Seats configured: " + request.getSeatMap().size());
 
         try {
             HttpRequest httpRequest = HttpRequest.newBuilder()
@@ -60,21 +62,110 @@ public class AnalysisClient {
                     .POST(HttpRequest.BodyPublishers.ofString(requestJson))
                     .build();
 
-            HttpResponse<String> response = httpClient.send(httpRequest, 
-                    HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
 
             if (response.statusCode() != 200) {
-                throw new AnalysisException("Analysis failed with status: " + response.statusCode() 
+                throw new AnalysisException("Job submission failed with status: " + response.statusCode()
                         + ", body: " + response.body());
             }
 
-            return gson.fromJson(response.body(), AnalysisResponse.class);
-
+            // Expected JSON: { "job_id": "..." }
+            return gson.fromJson(response.body(), java.util.Map.class).get("job_id").toString();
         } catch (AnalysisException e) {
             throw e;
         } catch (Exception e) {
-            throw new AnalysisException("Failed to communicate with CV service: " + e.getMessage(), e);
+            throw new AnalysisException("Failed to submit analysis job: " + e.getMessage(), e);
         }
+    }
+
+    public AnalysisResponse waitForResult(String jobId) throws AnalysisException {
+        long start = System.currentTimeMillis();
+        while (true) {
+            if (System.currentTimeMillis() - start > DEFAULT_TIMEOUT.toMillis()) {
+                throw new AnalysisException("Timed out waiting for job result: " + jobId);
+            }
+
+            JobStatus status = getJobStatus(jobId);
+            if (status.status.equalsIgnoreCase("completed")) {
+                return getResult(jobId);
+            }
+            if (status.status.equalsIgnoreCase("failed")) {
+                throw new AnalysisException("Job failed: " + status.message);
+            }
+
+            System.out.println("Job " + jobId + " status=" + status.status + " progress=" + status.progress);
+            try {
+                Thread.sleep(POLL_INTERVAL.toMillis());
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new AnalysisException("Interrupted while polling job: " + jobId, ie);
+            }
+        }
+    }
+
+    private AnalysisResponse getResult(String jobId) throws AnalysisException {
+        try {
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + RESULT_ENDPOINT_PREFIX + jobId))
+                    .header("Content-Type", "application/json")
+                    .timeout(DEFAULT_TIMEOUT)
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new AnalysisException("Get result failed with status: " + response.statusCode()
+                        + ", body: " + response.body());
+            }
+
+            // Expected JSON: { job_id, status, result: { ...AnalysisResponse... }, error }
+            java.util.Map<?, ?> body = gson.fromJson(response.body(), java.util.Map.class);
+            Object resultObj = body.get("result");
+            if (resultObj == null) {
+                throw new AnalysisException("Job result not present yet for job_id: " + jobId);
+            }
+            // Re-serialize resultObj back to JSON string to parse as AnalysisResponse.
+            String resultJson = gson.toJson(resultObj);
+            return gson.fromJson(resultJson, AnalysisResponse.class);
+        } catch (Exception e) {
+            throw new AnalysisException("Failed to fetch result for job: " + jobId + " (" + e.getMessage() + ")", e);
+        }
+    }
+
+    private JobStatus getJobStatus(String jobId) throws AnalysisException {
+        try {
+            HttpRequest httpRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(baseUrl + STATUS_ENDPOINT_PREFIX + jobId))
+                    .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new AnalysisException("Get status failed with status: " + response.statusCode()
+                        + ", body: " + response.body());
+            }
+
+            java.util.Map<?, ?> body = gson.fromJson(response.body(), java.util.Map.class);
+            JobStatus status = new JobStatus();
+            status.jobId = jobId;
+            status.status = body.get("status").toString();
+            Object progressObj = body.get("progress");
+            status.progress = progressObj == null ? 0.0 : Double.parseDouble(progressObj.toString());
+            Object messageObj = body.get("message");
+            status.message = messageObj == null ? null : messageObj.toString();
+            return status;
+        } catch (Exception e) {
+            throw new AnalysisException("Failed to fetch status for job: " + jobId + " (" + e.getMessage() + ")", e);
+        }
+    }
+
+    private static class JobStatus {
+        String jobId;
+        String status;
+        double progress;
+        String message;
     }
 
     /**

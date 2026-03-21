@@ -15,23 +15,61 @@ class Track:
     track_id: int
     bbox: Tuple[int, int, int, int]
     centroid: Tuple[int, int]
-    age: int = 0
-    hits: int = 1
+    age: int = 0  # counts total frames (visible + missed)
+    hits: int = 0  # counts visible updates
     time_since_update: int = 0
+
+    # Detection confidence history for this track (used as "track confidence").
+    last_detection_confidence: float = 0.0
+    detection_confidence_sum: float = 0.0
+    detection_confidence_count: int = 0
+
+    # Track lifecycle metadata (in tracker frames, not wall-clock).
+    start_frame_idx: int = 0
+    end_frame_idx: int = 0
+    visible_frames: int = 0
+
+    # Heuristic approximation: without ground truth, ID-switches are detected as
+    # track fragmentation near recently-ended tracks.
+    id_switch_count: int = 0
     
-    def update(self, bbox: Tuple[int, int, int, int]):
-        """Update track with new detection."""
+    def update(self, bbox: Tuple[int, int, int, int], confidence: float, frame_idx: int):
+        """Update track with a new detection."""
         self.bbox = bbox
         x1, y1, x2, y2 = bbox
         self.centroid = ((x1 + x2) // 2, (y1 + y2) // 2)
         self.hits += 1
+        self.visible_frames += 1
         self.time_since_update = 0
         self.age += 1
+
+        self.last_detection_confidence = float(confidence)
+        self.detection_confidence_sum += float(confidence)
+        self.detection_confidence_count += 1
+        self.end_frame_idx = frame_idx
     
-    def mark_missed(self):
+    def mark_missed(self, frame_idx: int):
         """Mark track as missed in current frame."""
         self.time_since_update += 1
         self.age += 1
+        self.end_frame_idx = frame_idx
+
+    def mean_detection_confidence(self) -> float:
+        if self.detection_confidence_count <= 0:
+            return 0.0
+        return float(self.detection_confidence_sum / self.detection_confidence_count)
+
+    def stability_score(self) -> float:
+        """
+        Track stability score in [0,1].
+
+        This is heuristic: combines presence ratio with ID fragmentation penalty.
+        """
+        if self.age <= 0:
+            return 0.0
+        presence = float(self.hits) / float(self.age)
+        id_factor = 1.0 / (1.0 + float(self.id_switch_count))
+        return float(np.clip(presence * id_factor, 0.0, 1.0))
 
 
 class ByteTracker:
@@ -44,7 +82,10 @@ class ByteTracker:
         self,
         track_thresh: float = 0.5,
         track_buffer: int = 30,
-        match_thresh: float = 0.8
+        match_thresh: float = 0.8,
+        fps_sampling: float = 5.0,
+        id_switch_distance_px: float = 60.0,
+        id_switch_lookback_sec: float = 15.0
     ):
         """
         Initialize ByteTracker.
@@ -57,14 +98,23 @@ class ByteTracker:
         self.track_thresh = track_thresh
         self.track_buffer = track_buffer
         self.match_thresh = match_thresh
+
+        self.fps_sampling = fps_sampling
+        self.id_switch_distance_px = id_switch_distance_px
+        self.id_switch_lookback_frames = max(1, int(id_switch_lookback_sec * fps_sampling))
         
         self.tracks: List[Track] = []
         self.lost_tracks: List[Track] = []
         self.next_id = 1
+
+        self._ended_track_events: List[Tuple[int, Tuple[int, int]]] = []  # (end_frame_idx, centroid)
+        self.id_switch_events: int = 0
+
+        self._frame_idx: int = 0
         
         print(f"[Tracker] Initialized ByteTracker with buffer={track_buffer}")
     
-    def update(self, detections: List['Detection']) -> List[Track]:
+    def update(self, detections: List['Detection'], frame_idx: Optional[int] = None) -> List[Track]:
         """
         Update tracker with new detections.
         
@@ -74,10 +124,16 @@ class ByteTracker:
         Returns:
             List of active tracks
         """
+        if frame_idx is None:
+            self._frame_idx += 1
+            frame_idx = self._frame_idx
+        else:
+            self._frame_idx = frame_idx
+
         if not detections:
             # Mark all tracks as missed
             for track in self.tracks:
-                track.mark_missed()
+                track.mark_missed(frame_idx)
             self._handle_lost_tracks()
             return self.tracks
         
@@ -98,16 +154,34 @@ class ByteTracker:
         
         # Handle unmatched tracks
         for idx in unmatched_tracks:
-            self.tracks[idx].mark_missed()
+            self.tracks[idx].mark_missed(frame_idx)
         
         # Create new tracks for unmatched high confidence detections
         for idx in unmatched_dets:
             det = high_dets[idx]
+            # Approximate ID-switch detection by proximity to recently-ended tracks.
+            id_switches = 0
+            for ended_frame, ended_centroid in self._ended_track_events:
+                if ended_frame < frame_idx - self.id_switch_lookback_frames:
+                    continue
+                dx = ended_centroid[0] - det.centroid[0]
+                dy = ended_centroid[1] - det.centroid[1]
+                dist = float(np.sqrt(dx * dx + dy * dy))
+                if dist <= self.id_switch_distance_px:
+                    id_switches += 1
+                    break
+
             new_track = Track(
                 track_id=self.next_id,
                 bbox=det.bbox,
                 centroid=det.centroid
             )
+            new_track.start_frame_idx = frame_idx
+            new_track.end_frame_idx = frame_idx
+            # Initialize stats based on this first detection.
+            new_track.update(det.bbox, det.confidence, frame_idx)
+            new_track.id_switch_count = id_switches
+            self.id_switch_events += id_switches
             self.tracks.append(new_track)
             self.next_id += 1
         
@@ -141,9 +215,13 @@ class ByteTracker:
         matched_tracks = set()
         matched_dets = set()
         
+        # Note: we update track state after association, but actual frame_idx is
+        # available from ByteTracker.update().
+        frame_idx = self._frame_idx
+
         for row, col in zip(row_indices, col_indices):
             if iou_matrix[row, col] >= self.match_thresh:
-                tracks[row].update(detections[col].bbox)
+                tracks[row].update(detections[col].bbox, detections[col].confidence, frame_idx)
                 matched_tracks.add(row)
                 matched_dets.add(col)
         
@@ -179,6 +257,8 @@ class ByteTracker:
         for track in self.tracks:
             if track.time_since_update > self.track_buffer:
                 self.lost_tracks.append(track)
+                # Record ended identity event for ID-switch approximation.
+                self._ended_track_events.append((track.end_frame_idx, track.centroid))
             else:
                 active_tracks.append(track)
         
@@ -189,9 +269,16 @@ class ByteTracker:
             t for t in self.lost_tracks 
             if t.time_since_update <= self.track_buffer * 2
         ]
+
+        # Keep ended events bounded.
+        if len(self._ended_track_events) > 5000:
+            self._ended_track_events = self._ended_track_events[-2000:]
     
     def reset(self):
         """Reset tracker state."""
         self.tracks = []
         self.lost_tracks = []
         self.next_id = 1
+        self._ended_track_events = []
+        self.id_switch_events = 0
+        self._frame_idx = 0

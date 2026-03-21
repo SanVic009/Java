@@ -1,11 +1,9 @@
 package com.anticheat.model;
 
 import com.google.gson.annotations.SerializedName;
-import java.util.List;
 
 /**
  * Request payload sent to Python CV service for analysis.
- * If seatMap is null or empty, auto-discovery mode will be used.
  */
 public class ExamRequest {
     @SerializedName("exam_id")
@@ -15,28 +13,18 @@ public class ExamRequest {
     private String videoPath;
 
     @SerializedName("fps_sampling")
-    private int fpsSampling;
+    private int fpsSampling = 5;
 
-    @SerializedName("baseline_duration_sec")
-    private int baselineDurationSec;
-
-    @SerializedName("seat_map")
-    private List<SeatMapping> seatMap;  // Optional - null triggers auto-discovery
-
-    @SerializedName("discovery_duration_sec")
-    private int discoveryDurationSec;  // Duration for auto-discovery phase
+    @SerializedName("render_annotated_video")
+    private boolean renderAnnotatedVideo = false;
 
     public ExamRequest() {}
 
-    public ExamRequest(String examId, String videoPath, int fpsSampling, 
-                       int baselineDurationSec, List<SeatMapping> seatMap,
-                       int discoveryDurationSec) {
+    public ExamRequest(String examId, String videoPath, int fpsSampling, boolean renderAnnotatedVideo) {
         this.examId = examId;
         this.videoPath = videoPath;
         this.fpsSampling = fpsSampling;
-        this.baselineDurationSec = baselineDurationSec;
-        this.seatMap = seatMap;
-        this.discoveryDurationSec = discoveryDurationSec;
+        this.renderAnnotatedVideo = renderAnnotatedVideo;
     }
 
     // Builder pattern for cleaner construction
@@ -48,9 +36,7 @@ public class ExamRequest {
         private String examId;
         private String videoPath;
         private int fpsSampling = 5; // Default
-        private int baselineDurationSec = 60; // Default 1 minute
-        private int discoveryDurationSec = 120; // Default 2 minutes for auto-discovery
-        private List<SeatMapping> seatMap = null; // Default: auto-discovery
+        private boolean renderAnnotatedVideo = false;
 
         public Builder examId(String examId) {
             this.examId = examId;
@@ -67,32 +53,14 @@ public class ExamRequest {
             return this;
         }
 
-        public Builder baselineDurationSec(int baselineDurationSec) {
-            this.baselineDurationSec = baselineDurationSec;
-            return this;
-        }
-
-        public Builder discoveryDurationSec(int discoveryDurationSec) {
-            this.discoveryDurationSec = discoveryDurationSec;
-            return this;
-        }
-
-        public Builder seatMap(List<SeatMapping> seatMap) {
-            this.seatMap = seatMap;
+        public Builder renderAnnotatedVideo(boolean renderAnnotatedVideo) {
+            this.renderAnnotatedVideo = renderAnnotatedVideo;
             return this;
         }
 
         public ExamRequest build() {
-            return new ExamRequest(examId, videoPath, fpsSampling, 
-                    baselineDurationSec, seatMap, discoveryDurationSec);
+            return new ExamRequest(examId, videoPath, fpsSampling, renderAnnotatedVideo);
         }
-    }
-
-    /**
-     * Check if auto-discovery mode should be used.
-     */
-    public boolean isAutoDiscoveryMode() {
-        return seatMap == null || seatMap.isEmpty();
     }
 
     // Getters and Setters
@@ -120,27 +88,12 @@ public class ExamRequest {
         this.fpsSampling = fpsSampling;
     }
 
-    public int getBaselineDurationSec() {
-        return baselineDurationSec;
+    public boolean isRenderAnnotatedVideo() {
+        return renderAnnotatedVideo;
     }
 
-    public void setBaselineDurationSec(int baselineDurationSec) {
-        this.baselineDurationSec = baselineDurationSec;
+    public void setRenderAnnotatedVideo(boolean renderAnnotatedVideo) {
+        this.renderAnnotatedVideo = renderAnnotatedVideo;
     }
 
-    public int getDiscoveryDurationSec() {
-        return discoveryDurationSec;
-    }
-
-    public void setDiscoveryDurationSec(int discoveryDurationSec) {
-        this.discoveryDurationSec = discoveryDurationSec;
-    }
-
-    public List<SeatMapping> getSeatMap() {
-        return seatMap;
-    }
-
-    public void setSeatMap(List<SeatMapping> seatMap) {
-        this.seatMap = seatMap;
-    }
 }

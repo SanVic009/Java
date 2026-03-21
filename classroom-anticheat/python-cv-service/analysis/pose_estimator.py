@@ -16,7 +16,11 @@ class PoseEstimate:
     roll: float  # Head tilt (degrees)
     gaze_x: float  # Normalized gaze direction x (-1 to 1)
     gaze_y: float  # Normalized gaze direction y (-1 to 1)
-    confidence: float
+    landmark_visibility: float  # 0..1
+    head_pose_confidence: float  # 0..1
+    gaze_reliability: float  # 0..1
+    confidence: float  # combined 0..1
+    pose_keypoints_2d: List[List[float]]  # 2D points used for PnP (crop-local pixels)
 
 
 class PoseEstimator:
@@ -112,12 +116,26 @@ class PoseEstimator:
         
         # Extract 2D image points
         image_points = self._get_image_points(landmarks, crop_w, crop_h)
+        pose_keypoints_2d = [[float(p[0]), float(p[1])] for p in image_points]
         
-        # Estimate head pose
-        yaw, pitch, roll = self._estimate_pose(image_points, crop_w, crop_h)
+        # Landmark visibility (best-effort from MediaPipe fields)
+        landmark_visibility = self._compute_landmark_visibility(landmarks)
         
-        # Estimate gaze
-        gaze_x, gaze_y = self._estimate_gaze(landmarks, crop_w, crop_h)
+        # Estimate head pose with confidence from reprojection error
+        yaw, pitch, roll, head_pose_confidence = self._estimate_pose(
+            image_points, crop_w, crop_h
+        )
+        
+        # Estimate gaze with confidence from eye/iris agreement
+        gaze_x, gaze_y, gaze_reliability = self._estimate_gaze(
+            landmarks, crop_w, crop_h
+        )
+        
+        confidence = (
+            landmark_visibility
+            * head_pose_confidence
+            * gaze_reliability
+        )
         
         return PoseEstimate(
             yaw=yaw,
@@ -125,9 +143,41 @@ class PoseEstimator:
             roll=roll,
             gaze_x=gaze_x,
             gaze_y=gaze_y,
-            confidence=1.0  # Face mesh doesn't provide confidence
+            landmark_visibility=landmark_visibility,
+            head_pose_confidence=head_pose_confidence,
+            gaze_reliability=gaze_reliability,
+            confidence=confidence
+            ,
+            pose_keypoints_2d=pose_keypoints_2d,
         )
     
+    def _compute_landmark_visibility(self, landmarks) -> float:
+        """
+        Compute a visibility score from landmarks when available.
+
+        MediaPipe's FaceMesh may or may not provide `visibility` per landmark depending
+        on runtime/version; this is therefore best-effort.
+        """
+        vis: List[float] = []
+        for idx in [
+            self.NOSE_TIP,
+            self.CHIN,
+            self.LEFT_EYE_LEFT,
+            self.LEFT_EYE_RIGHT,
+            self.RIGHT_EYE_LEFT,
+            self.RIGHT_EYE_RIGHT,
+            self.LEFT_MOUTH,
+            self.RIGHT_MOUTH,
+        ]:
+            lm = landmarks.landmark[idx]
+            v = getattr(lm, "visibility", None)
+            if v is None:
+                # If not available, assume visible rather than forcing 0.
+                vis.append(1.0)
+            else:
+                vis.append(float(v))
+        return float(np.clip(np.mean(vis) if vis else 1.0, 0.0, 1.0))
+
     def _get_image_points(
         self, 
         landmarks, 
@@ -153,7 +203,7 @@ class PoseEstimator:
         image_points: np.ndarray,
         width: int,
         height: int
-    ) -> Tuple[float, float, float]:
+    ) -> Tuple[float, float, float, float]:
         """Estimate yaw, pitch, roll from image points."""
         # Camera matrix (approximation)
         focal_length = width
@@ -176,7 +226,7 @@ class PoseEstimator:
         )
         
         if not success:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0
         
         # Convert rotation vector to rotation matrix
         rotation_mat, _ = cv2.Rodrigues(rotation_vec)
@@ -189,14 +239,30 @@ class PoseEstimator:
         yaw = float(euler_angles[1])
         roll = float(euler_angles[2])
         
-        return yaw, pitch, roll
+        # Confidence based on reprojection error: smaller error => higher confidence.
+        projected, _ = cv2.projectPoints(
+            self.model_points,
+            rotation_vec,
+            translation_vec,
+            camera_matrix,
+            dist_coeffs
+        )
+        projected = projected.reshape(-1, 2)
+        err = np.linalg.norm(projected - image_points, axis=1).mean()  # pixels
+        # Normalize error by crop size for stable range across resolutions.
+        norm = max(width, height) + 1e-6
+        # err_norm roughly 0..~0.5. Map to 0..1 with a soft reciprocal.
+        err_norm = err / norm
+        head_pose_confidence = float(np.clip(1.0 / (1.0 + 8.0 * err_norm), 0.0, 1.0))
+        
+        return yaw, pitch, roll, head_pose_confidence
     
     def _estimate_gaze(
         self, 
         landmarks, 
         width: int, 
         height: int
-    ) -> Tuple[float, float]:
+    ) -> Tuple[float, float, float]:
         """
         Estimate gaze direction from iris landmarks.
         Returns normalized gaze offset from eye center.
@@ -237,11 +303,17 @@ class PoseEstimator:
             # Clamp to reasonable range
             gaze_x = max(-1.0, min(1.0, gaze_x * 3))  # Scale up for sensitivity
             gaze_y = max(-1.0, min(1.0, gaze_y * 10))
-            
-            return gaze_x, gaze_y
+
+            # Gaze reliability: left/right agreement + basic iris geometry sanity.
+            agreement = 1.0 - (abs(left_gaze_x - right_gaze_x) / 2.0)
+            iris_present = 1.0 - (abs(left_iris_y - right_iris_y) / (height + 1e-6))
+            gaze_reliability = float(
+                np.clip(0.5 * agreement + 0.5 * iris_present, 0.0, 1.0)
+            )
+            return gaze_x, gaze_y, gaze_reliability
             
         except (IndexError, AttributeError):
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
     
     def close(self):
         """Release resources."""

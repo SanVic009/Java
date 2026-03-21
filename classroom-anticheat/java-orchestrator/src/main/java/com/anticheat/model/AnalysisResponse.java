@@ -2,6 +2,7 @@ package com.anticheat.model;
 
 import com.google.gson.annotations.SerializedName;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Response from Python CV service containing analysis results.
@@ -10,17 +11,16 @@ public class AnalysisResponse {
     @SerializedName("exam_id")
     private String examId;
 
-    private List<StudentResult> results;
+    private List<TrackResult> results;
 
-    @SerializedName("auto_discovered")
-    private boolean autoDiscovered;
+    private Map<String, Object> observability;
 
-    @SerializedName("discovered_seats")
-    private List<DiscoveredSeat> discoveredSeats;
+    @SerializedName("annotated_video")
+    private AnnotatedVideoInfo annotatedVideo;
 
     public AnalysisResponse() {}
 
-    public AnalysisResponse(String examId, List<StudentResult> results) {
+    public AnalysisResponse(String examId, List<TrackResult> results) {
         this.examId = examId;
         this.results = results;
     }
@@ -34,28 +34,28 @@ public class AnalysisResponse {
         this.examId = examId;
     }
 
-    public List<StudentResult> getResults() {
+    public List<TrackResult> getResults() {
         return results;
     }
 
-    public void setResults(List<StudentResult> results) {
+    public void setResults(List<TrackResult> results) {
         this.results = results;
     }
 
-    public boolean isAutoDiscovered() {
-        return autoDiscovered;
+    public Map<String, Object> getObservability() {
+        return observability;
     }
 
-    public void setAutoDiscovered(boolean autoDiscovered) {
-        this.autoDiscovered = autoDiscovered;
+    public void setObservability(Map<String, Object> observability) {
+        this.observability = observability;
     }
 
-    public List<DiscoveredSeat> getDiscoveredSeats() {
-        return discoveredSeats;
+    public AnnotatedVideoInfo getAnnotatedVideo() {
+        return annotatedVideo;
     }
 
-    public void setDiscoveredSeats(List<DiscoveredSeat> discoveredSeats) {
-        this.discoveredSeats = discoveredSeats;
+    public void setAnnotatedVideo(AnnotatedVideoInfo annotatedVideo) {
+        this.annotatedVideo = annotatedVideo;
     }
 
     /**
@@ -64,7 +64,7 @@ public class AnalysisResponse {
     public int getSuspiciousStudentCount() {
         if (results == null) return 0;
         return (int) results.stream()
-                .filter(StudentResult::hasSuspiciousActivity)
+                .filter(TrackResult::hasSuspiciousIntervals)
                 .count();
     }
 
@@ -74,14 +74,7 @@ public class AnalysisResponse {
     public int getTotalSuspiciousIntervals() {
         if (results == null) return 0;
         return results.stream()
-                .mapToInt(StudentResult::getSuspiciousCount)
+                .mapToInt(r -> r.getIntervals() != null ? r.getIntervals().size() : 0)
                 .sum();
-    }
-
-    /**
-     * Get count of discovered seats (if auto-discovery was used).
-     */
-    public int getDiscoveredSeatCount() {
-        return discoveredSeats != null ? discoveredSeats.size() : 0;
     }
 }

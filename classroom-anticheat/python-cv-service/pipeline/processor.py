@@ -1,393 +1,147 @@
 """
-Video processing pipeline.
-Orchestrates the full analysis workflow with auto-discovery support.
-"""
-import cv2
-import numpy as np
-from typing import Dict, List, Optional, Tuple
-from pathlib import Path
+Uncertainty-aware, track-centric two-phase pipeline orchestrator.
 
-from models.schemas import SeatMapping, AnalysisRequest
-from detection import PersonDetector, ByteTracker, Track
-from analysis import (
-    SeatAssigner,
-    PoseEstimator,
-    BaselineCalibrator,
-    SignalComputer,
-    Scorer,
-    TemporalAggregator,
-    SeatAutoDiscovery,
-    compute_distance
-)
+Phase 1 (Feature Extraction):
+- Persist per-frame/per-track features to disk (JSONL + track_meta.json)
+- No decisions, no suspicious interval computation
+
+Phase 2 (Scoring + Aggregation):
+- Read persisted features
+- Compute confidence-weighted suspicion scores using a rolling baseline per track
+- Apply EMA + hysteresis + robust interval merging
+- Apply quality gates and return uncertainty-aware intervals
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, Optional
+
 from config import config
+from models.schemas import AnalysisRequest
+
+from pipeline.feature_extractor import FeatureExtractorPhase1
+from pipeline.phase2_scoring import Phase2Scoring
+from pipeline.video_visualizer import VideoVisualizer
 
 
 class VideoProcessor:
     """
-    Main video processing pipeline with auto-discovery support.
-    
-    Flow (with auto-discovery):
-    1. Sample frames at specified FPS
-    2. Detect persons (YOLOv8)
-    3. Track persons (ByteTrack)
-    4. [Discovery Phase] Collect stable positions → generate seat map
-    5. Assign tracks to seats
-    6. Estimate head pose and gaze (MediaPipe)
-    7. Calibrate baseline
-    8. Compute signals
-    9. Score frames
-    10. Aggregate into intervals
+    Two-phase processor that is resume-friendly:
+    - If phase1 outputs exist, Phase 1 is skipped.
+    - If phase2 outputs exist, Phase 2 is skipped.
     """
-    
+
     def __init__(self, request: AnalysisRequest):
-        """
-        Initialize processor with request parameters.
-        
-        Args:
-            request: Analysis request with video path and optional seat mapping
-        """
         self.request = request
-        self.fps_sampling = request.fps_sampling
-        self.baseline_duration = request.baseline_duration_sec
-        
-        # Check if we need auto-discovery
-        self.use_auto_discovery = (request.seat_map is None or len(request.seat_map) == 0)
-        
-        # Initialize components
-        print("\n" + "="*60)
-        print("Initializing Video Processor")
-        print("="*60)
-        
-        self.detector = PersonDetector(confidence=config.YOLO_CONFIDENCE)
-        self.tracker = ByteTracker()
-        self.pose_estimator = PoseEstimator()
-        self.signal_computer = SignalComputer()
-        self.scorer = Scorer()
-        self.aggregator = TemporalAggregator(self.fps_sampling)
-        
-        # Auto-discovery or predefined seats
-        self.auto_discovery: Optional[SeatAutoDiscovery] = None
-        self.seat_assigner: Optional[SeatAssigner] = None
-        self.discovered_seats: List[SeatMapping] = []
-        
-        if self.use_auto_discovery:
-            print("\n*** AUTO-DISCOVERY MODE ***")
-            print(f"No seat map provided - will auto-discover seats")
-            self.auto_discovery = SeatAutoDiscovery(
-                discovery_duration_sec=request.discovery_duration_sec,
-                fps=self.fps_sampling
+        self.fps_sampling = int(request.fps_sampling)
+
+    def run(self, job_dir: Path) -> Dict[str, Any]:
+        job_dir.mkdir(parents=True, exist_ok=True)
+
+        features_jsonl_path = job_dir / "phase1_features.jsonl"
+        track_meta_path = job_dir / "phase1_track_meta.json"
+        phase1_stats_path = job_dir / "phase1_stats.json"
+
+        results_path = job_dir / "phase2_results.json"
+        phase2_stats_path = job_dir / "phase2_stats.json"
+        frame_scores_path = job_dir / "phase2_frame_scores.jsonl"
+
+        # Phase 1
+        if not (features_jsonl_path.exists() and track_meta_path.exists()):
+            phase1 = FeatureExtractorPhase1()
+            phase1.extract(
+                exam_id=self.request.exam_id,
+                video_path=self.request.video_path,
+                fps_sampling=self.fps_sampling,
+                out_features_path=features_jsonl_path,
+                out_track_meta_path=track_meta_path,
+                out_phase1_stats_path=phase1_stats_path,
             )
-            # Baseline calibrator will be initialized after discovery
-            self.baseline_calibrator: Optional[BaselineCalibrator] = None
-        else:
-            print(f"\nUsing predefined seat map ({len(request.seat_map)} seats)")
-            self.seat_assigner = SeatAssigner(request.seat_map)
-            self.baseline_calibrator = BaselineCalibrator(
-                self.baseline_duration, 
-                self.fps_sampling
+
+        # Phase 2
+        if not results_path.exists():
+            phase2 = Phase2Scoring()
+            payload = phase2.run(
+                out_results_path=results_path,
+                out_phase2_stats_path=phase2_stats_path,
+                features_jsonl_path=features_jsonl_path,
+                track_meta_path=track_meta_path,
+                exam_id=self.request.exam_id,
+                out_frame_scores_path=frame_scores_path,
             )
-        
-        # State
-        self.track_poses: Dict[int, 'PoseEstimate'] = {}
-        self.student_to_track: Dict[int, int] = {}
-        
-        print("="*60 + "\n")
-    
-    def process(self) -> Tuple[Dict[int, List['SuspiciousInterval']], bool, List]:
-        """
-        Process the video and return suspicious intervals.
-        
-        Returns:
-            Tuple of:
-            - Dict mapping student_id -> list of SuspiciousInterval
-            - bool indicating if auto-discovery was used
-            - List of discovered seat info (if auto-discovered)
-        """
-        video_path = Path(self.request.video_path)
-        
-        if not video_path.exists():
-            raise FileNotFoundError(f"Video not found: {video_path}")
-        
-        cap = cv2.VideoCapture(str(video_path))
-        
-        if not cap.isOpened():
-            raise RuntimeError(f"Failed to open video: {video_path}")
-        
-        # Get video properties
-        original_fps = cap.get(cv2.CAP_PROP_FPS)
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = total_frames / original_fps if original_fps > 0 else 0
-        
-        print(f"Video: {video_path.name}")
-        print(f"  Original FPS: {original_fps:.1f}")
-        print(f"  Total frames: {total_frames}")
-        print(f"  Duration: {duration:.1f}s")
-        print(f"  Sampling at: {self.fps_sampling} FPS")
-        
-        # Calculate frame skip
-        frame_skip = max(1, int(original_fps / self.fps_sampling))
-        expected_samples = total_frames // frame_skip
-        
-        print(f"  Frame skip: {frame_skip}")
-        print(f"  Expected samples: {expected_samples}")
-        
-        if self.use_auto_discovery:
-            print(f"\n  Phase 1: Auto-discovery ({self.request.discovery_duration_sec}s)")
-            print(f"  Phase 2: Baseline calibration ({self.baseline_duration}s)")
-            print(f"  Phase 3: Analysis")
         else:
-            print(f"\n  Phase 1: Baseline calibration ({self.baseline_duration}s)")
-            print(f"  Phase 2: Analysis")
-        
-        print()
-        
-        frame_idx = 0
-        sample_idx = 0
-        
-        try:
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                
-                # Sample at target FPS
-                if frame_idx % frame_skip == 0:
-                    timestamp = frame_idx / original_fps
-                    self._process_frame(frame, sample_idx, timestamp)
-                    sample_idx += 1
-                    
-                    # Progress update
-                    if sample_idx % 100 == 0:
-                        phase = self._get_current_phase()
-                        print(f"  [{phase}] Processed {sample_idx} frames "
-                              f"({timestamp:.1f}s / {duration:.1f}s)")
-                
-                frame_idx += 1
-        
-        finally:
-            cap.release()
-            self.pose_estimator.close()
-        
-        print(f"\nProcessed {sample_idx} frames total")
-        print("Aggregating results...")
-        
-        # Get discovered seat info for response
-        discovered_info = []
-        if self.use_auto_discovery and self.auto_discovery:
-            for seat in self.auto_discovery.discovered_seats:
-                discovered_info.append({
-                    'seat_id': seat.seat_id,
-                    'student_id': seat.student_id,
-                    'bbox': seat.bbox,
-                    'neighbors': seat.neighbors,
-                    'stability_score': round(seat.stability_score, 2)
-                })
-        
-        # Aggregate and return results
-        return self.aggregator.aggregate(), self.use_auto_discovery, discovered_info
-    
-    def _get_current_phase(self) -> str:
-        """Get current processing phase for status display."""
-        if self.use_auto_discovery:
-            if self.auto_discovery and self.auto_discovery.is_discovering():
-                return "Discovery"
-            elif self.baseline_calibrator and self.baseline_calibrator.is_calibrating():
-                return "Baseline"
-            else:
-                return "Analysis"
+            import json
+
+            payload = json.loads(results_path.read_text(encoding="utf-8"))
+
+        # Merge observability from phase1+phase2.
+        import json
+
+        observability: Dict[str, Any] = {}
+        if phase1_stats_path.exists():
+            observability["phase1"] = json.loads(phase1_stats_path.read_text(encoding="utf-8"))
+        if phase2_stats_path.exists():
+            observability["phase2"] = json.loads(phase2_stats_path.read_text(encoding="utf-8"))
+
+        if "observability" in payload and payload["observability"]:
+            payload["observability"] = {**payload["observability"], **observability}
         else:
-            if self.baseline_calibrator and self.baseline_calibrator.is_calibrating():
-                return "Baseline"
-            else:
-                return "Analysis"
-    
-    def _process_frame(
-        self, 
-        frame: np.ndarray, 
-        frame_idx: int, 
-        timestamp: float
-    ):
-        """Process a single frame."""
-        # 1. Detect persons
-        detections = self.detector.detect(frame)
-        
-        # 2. Track persons
-        tracks = self.tracker.update(detections)
-        
-        # 3. Handle auto-discovery phase
-        if self.use_auto_discovery and self.auto_discovery:
-            if self.auto_discovery.is_discovering():
-                # Still discovering - collect observations
-                self.auto_discovery.add_observation(tracks)
-                self.auto_discovery.advance_frame()
-                return
-            
-            # Discovery just completed - initialize seat assigner and baseline
-            if self.seat_assigner is None:
-                self._initialize_after_discovery()
-        
-        # 4. Assign tracks to seats
-        if self.seat_assigner:
-            self.student_to_track = self.seat_assigner.update(tracks)
-        
-        # Build track lookup
-        track_lookup = {t.track_id: t for t in tracks}
-        
-        # 5. Process each assigned student
-        for student_id, track_id in self.student_to_track.items():
-            track = track_lookup.get(track_id)
-            if track is None:
-                continue
-            
-            # 6. Estimate pose
-            pose = self.pose_estimator.estimate(frame, track.bbox)
-            if pose is None:
-                continue
-            
-            self.track_poses[track_id] = pose
-            
-            # 7. During calibration, collect samples
-            if self.baseline_calibrator and self.baseline_calibrator.is_calibrating():
-                # Compute neighbor distance for baseline
-                neighbor_dist = self._compute_neighbor_distance(
-                    student_id, track, track_lookup
-                )
-                
-                self.baseline_calibrator.add_sample(
-                    student_id=student_id,
-                    yaw=pose.yaw,
-                    gaze_x=pose.gaze_x,
-                    neighbor_distance=neighbor_dist
-                )
-            elif self.baseline_calibrator:
-                # 8. After calibration, compute signals and score
-                baseline = self.baseline_calibrator.get_baseline(student_id)
-                if baseline is None or not baseline.is_ready():
-                    continue
-                
-                # Compute neighbor distance and get neighbor's yaw
-                neighbor_dist, neighbor_yaw = self._get_neighbor_info(
-                    student_id, track, track_lookup
-                )
-                
-                # Compute signals
-                signals = self.signal_computer.compute(
-                    student_id=student_id,
-                    baseline=baseline,
-                    yaw=pose.yaw,
-                    gaze_x=pose.gaze_x,
-                    neighbor_distance=neighbor_dist,
-                    neighbor_yaw=neighbor_yaw
-                )
-                
-                # Score frame
-                frame_score = self.scorer.score_frame(
-                    frame_idx=frame_idx,
-                    timestamp=timestamp,
-                    student_id=student_id,
-                    signals=signals
-                )
-                
-                # Add to aggregator
-                self.aggregator.add_score(frame_score)
-        
-        # Advance calibration frame counter
-        if self.baseline_calibrator:
-            self.baseline_calibrator.advance_frame()
-    
-    def _initialize_after_discovery(self):
-        """Initialize components after auto-discovery completes."""
-        print("\n" + "-"*40)
-        print("Auto-discovery complete. Initializing analysis components...")
-        
-        # Get discovered seat mappings
-        self.discovered_seats = self.auto_discovery.get_seat_mappings()
-        
-        if not self.discovered_seats:
-            print("WARNING: No seats discovered! Analysis may fail.")
-            return
-        
-        # Initialize seat assigner with discovered seats
-        self.seat_assigner = SeatAssigner(self.discovered_seats)
-        
-        # Initialize baseline calibrator
-        self.baseline_calibrator = BaselineCalibrator(
-            self.baseline_duration,
-            self.fps_sampling
+            payload["observability"] = observability
+
+        # Phase 3: optional annotated video rendering (background).
+        # Must be additive and must not re-run any CV models.
+        render_enabled = bool(getattr(self.request, "render_annotated_video", False)) or bool(
+            getattr(config, "RENDER_ANNOTATED_VIDEO_DEFAULT", False)
         )
-        
-        print(f"Initialized with {len(self.discovered_seats)} discovered seats")
-        print("-"*40 + "\n")
-    
-    def _compute_neighbor_distance(
-        self,
-        student_id: int,
-        track: Track,
-        track_lookup: Dict[int, Track]
-    ) -> Optional[float]:
-        """Compute distance to nearest neighbor."""
-        if not self.seat_assigner:
-            return None
-        
-        neighbors = self.seat_assigner.get_student_neighbors(student_id)
-        
-        min_distance = None
-        
-        for neighbor_id in neighbors:
-            neighbor_track_id = self.student_to_track.get(neighbor_id)
-            if neighbor_track_id is None:
-                continue
-            
-            neighbor_track = track_lookup.get(neighbor_track_id)
-            if neighbor_track is None:
-                continue
-            
-            dist = compute_distance(track.centroid, neighbor_track.centroid)
-            
-            if min_distance is None or dist < min_distance:
-                min_distance = dist
-        
-        return min_distance
-    
-    def _get_neighbor_info(
-        self,
-        student_id: int,
-        track: Track,
-        track_lookup: Dict[int, Track]
-    ) -> Tuple[Optional[float], Optional[float]]:
-        """
-        Get nearest neighbor's distance and yaw.
-        
-        Returns:
-            Tuple of (distance, neighbor_yaw)
-        """
-        if not self.seat_assigner:
-            return None, None
-        
-        neighbors = self.seat_assigner.get_student_neighbors(student_id)
-        
-        min_distance = None
-        nearest_yaw = None
-        
-        for neighbor_id in neighbors:
-            neighbor_track_id = self.student_to_track.get(neighbor_id)
-            if neighbor_track_id is None:
-                continue
-            
-            neighbor_track = track_lookup.get(neighbor_track_id)
-            if neighbor_track is None:
-                continue
-            
-            dist = compute_distance(track.centroid, neighbor_track.centroid)
-            
-            if min_distance is None or dist < min_distance:
-                min_distance = dist
-                
-                # Get neighbor's pose if available
-                neighbor_pose = self.track_poses.get(neighbor_track_id)
-                if neighbor_pose and self.baseline_calibrator:
-                    neighbor_baseline = self.baseline_calibrator.get_baseline(neighbor_id)
-                    if neighbor_baseline:
-                        nearest_yaw = neighbor_pose.yaw - neighbor_baseline.baseline_yaw
-        
-        return min_distance, nearest_yaw
+        if render_enabled:
+            annotated_video_path = job_dir / "phase2_annotated.mp4"
+            payload["annotated_video"] = {
+                "file_path": str(annotated_video_path),
+                "status": "processing",
+                "resolution": None,
+                "frame_rate": None,
+                "duration_sec": None,
+            }
+
+            # Persist initial placeholder so clients polling /result can see progress.
+            import json
+            results_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+            def _render_bg():
+                try:
+                    visualizer = VideoVisualizer()
+                    final_info = visualizer.render(
+                        job_id=str(job_dir.name),
+                        source_video_path=self.request.video_path,
+                        phase2_results=payload,
+                        phase1_features_path=features_jsonl_path,
+                        out_video_path=annotated_video_path,
+                        cfg=config,
+                    )
+                    payload_final = VideoProcessor._read_results_json(results_path)
+                    payload_final["annotated_video"] = final_info
+                    results_path.write_text(json.dumps(payload_final, indent=2), encoding="utf-8")
+                except Exception as e:
+                    payload_err = VideoProcessor._read_results_json(results_path)
+                    payload_err["annotated_video"] = {
+                        "file_path": str(annotated_video_path),
+                        "status": "failed",
+                        "error": str(e),
+                        "resolution": None,
+                        "frame_rate": None,
+                        "duration_sec": None,
+                    }
+                    results_path.write_text(json.dumps(payload_err, indent=2), encoding="utf-8")
+
+            import threading
+            threading.Thread(target=_render_bg, daemon=True).start()
+
+        return payload
+
+    @staticmethod
+    def _read_results_json(results_path: Path) -> Dict[str, Any]:
+        import json
+        if not results_path.exists():
+            return {}
+        return json.loads(results_path.read_text(encoding="utf-8"))

@@ -1,52 +1,84 @@
 """
 Pydantic models for API request/response schemas.
+
+Note: This service is track-centric (per ByteTrack track_id) and uncertainty-aware.
 """
-from pydantic import BaseModel
-from typing import List, Optional
 
+from typing import Any, Dict, List, Optional
 
-class SeatMapping(BaseModel):
-    seat_id: int
-    student_id: int
-    bbox: List[int]  # [x1, y1, x2, y2]
-    neighbors: List[int]
+from pydantic import BaseModel, ConfigDict
 
 
 class AnalysisRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     exam_id: str
     video_path: str
+
+    # Frames are sampled at this effective FPS for analysis and persistence.
     fps_sampling: int = 5
-    baseline_duration_sec: int = 60
-    seat_map: Optional[List[SeatMapping]] = None  # Optional - auto-discovery if not provided
-    discovery_duration_sec: int = 120  # Auto-discovery period (2 minutes)
+
+    # Phase 3 rendering (pure visualization; no CV inference). Default off.
+    render_annotated_video: bool = False
 
 
-class SuspiciousInterval(BaseModel):
+class AnalyzeJobCreateResponse(BaseModel):
+    job_id: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    status: str  # queued | running | completed | failed
+    progress: float = 0.0
+    message: Optional[str] = None
+
+
+class SupportingStats(BaseModel):
+    head_deviation_pct: float
+    gaze_deviation_pct: float
+    proximity_avg_distance: Optional[float] = None
+    proximity_min_distance: Optional[float] = None
+
+
+class SuspicionInterval(BaseModel):
     start: float
     end: float
+
+    duration: float
     peak_score: float
-    reasons: List[str]
+    avg_score: float
+
+    # Avg confidence_weight across the interval frames (0..1).
+    confidence: float
+
+    # Ranked list by average component contribution.
+    dominant_signals: List[str]
+
+    supporting_stats: SupportingStats
 
 
-class StudentResult(BaseModel):
-    student_id: int
-    intervals: List[SuspiciousInterval]
-
-
-class DiscoveredSeatInfo(BaseModel):
-    """Info about an auto-discovered seat."""
-    seat_id: int
-    student_id: int
-    bbox: List[int]
-    neighbors: List[int]
+class TrackResult(BaseModel):
+    track_id: int
+    total_duration: float
     stability_score: float
+    intervals: List[SuspicionInterval]
 
 
 class AnalysisResponse(BaseModel):
     exam_id: str
-    results: List[StudentResult]
-    auto_discovered: bool = False  # Whether seats were auto-discovered
-    discovered_seats: Optional[List[DiscoveredSeatInfo]] = None  # Discovered seat info
+    results: List[TrackResult]
+
+    # Observability / debug info to support audits.
+    observability: Dict[str, Any] = {}
+
+    annotated_video: Optional[Dict[str, Any]] = None
+
+
+class JobResultResponse(BaseModel):
+    job_id: str
+    status: str
+    result: Optional[AnalysisResponse] = None
+    error: Optional[str] = None
 
 
 class HealthResponse(BaseModel):

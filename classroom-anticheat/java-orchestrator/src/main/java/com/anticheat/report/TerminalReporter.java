@@ -1,8 +1,7 @@
 package com.anticheat.report;
 
 import com.anticheat.model.AnalysisResponse;
-import com.anticheat.model.DiscoveredSeat;
-import com.anticheat.model.StudentResult;
+import com.anticheat.model.TrackResult;
 import com.anticheat.model.SuspiciousInterval;
 
 /**
@@ -19,13 +18,8 @@ public class TerminalReporter {
      */
     public void printReport(AnalysisResponse response) {
         printHeader(response);
-        
-        // Show auto-discovery info if applicable
-        if (response.isAutoDiscovered()) {
-            printDiscoveredSeats(response);
-        }
-        
-        printStudentResults(response);
+
+        printTrackResults(response);
         printSummary(response);
     }
 
@@ -35,63 +29,54 @@ public class TerminalReporter {
         System.out.println("        CLASSROOM ANTI-CHEAT ANALYSIS REPORT");
         System.out.println(SEPARATOR);
         System.out.println("Exam ID: " + response.getExamId());
-        System.out.println("Mode: " + (response.isAutoDiscovered() ? "AUTO-DISCOVERY" : "PREDEFINED SEATS"));
         System.out.println(THIN_SEPARATOR);
     }
 
-    private void printDiscoveredSeats(AnalysisResponse response) {
-        if (response.getDiscoveredSeats() == null || response.getDiscoveredSeats().isEmpty()) {
-            System.out.println("\nNo seats were discovered.");
-            return;
-        }
-
-        System.out.println("\nDISCOVERED SEATS:");
-        System.out.println(THIN_SEPARATOR);
-        
-        for (DiscoveredSeat seat : response.getDiscoveredSeats()) {
-            System.out.printf("  Seat %d → Student ID %d (stability: %.2f)%n",
-                    seat.getSeatId(),
-                    seat.getStudentId(),
-                    seat.getStabilityScore());
-        }
-        
-        System.out.println(THIN_SEPARATOR);
-    }
-
-    private void printStudentResults(AnalysisResponse response) {
+    private void printTrackResults(AnalysisResponse response) {
         if (response.getResults() == null || response.getResults().isEmpty()) {
-            System.out.println("\nNo students analyzed.");
+            System.out.println("\nNo tracks analyzed.");
             return;
         }
 
         boolean anyFlagged = false;
 
-        for (StudentResult student : response.getResults()) {
-            if (student.hasSuspiciousActivity()) {
+        for (TrackResult track : response.getResults()) {
+            if (track.hasSuspiciousIntervals()) {
                 anyFlagged = true;
-                printStudentSuspiciousActivity(student);
+                printTrackSuspiciousActivity(track);
             }
         }
 
         if (!anyFlagged) {
-            System.out.println("\n✓ No suspicious patterns detected for any student.");
+            System.out.println("\n✓ No suspicious patterns detected (confidence-weighted signals).");
         }
     }
 
-    private void printStudentSuspiciousActivity(StudentResult student) {
+    private void printTrackSuspiciousActivity(TrackResult track) {
         System.out.println();
-        System.out.println("Student " + student.getStudentId());
+        System.out.printf("Track %d (stability: %.2f)%n", track.getTrackId(), track.getStabilityScore());
 
-        for (SuspiciousInterval interval : student.getIntervals()) {
-            System.out.printf("  [%s – %s] Suspicious pattern (Peak Score: %.2f)%n",
+        if (track.getIntervals() == null || track.getIntervals().isEmpty()) {
+            return;
+        }
+
+        for (SuspiciousInterval interval : track.getIntervals()) {
+            System.out.printf("  [%s – %s] Suspicion signal (Peak: %.2f, Avg: %.2f, Conf: %.2f)%n",
                     interval.getFormattedStart(),
                     interval.getFormattedEnd(),
-                    interval.getPeakScore());
+                    interval.getPeakScore(),
+                    interval.getAvgScore(),
+                    interval.getConfidence());
 
-            // Print reasons indented
-            if (interval.getReasons() != null && !interval.getReasons().isEmpty()) {
-                System.out.print("    Reasons: ");
-                System.out.println(String.join(", ", interval.getReasons()));
+            if (interval.getDominantSignals() != null && !interval.getDominantSignals().isEmpty()) {
+                System.out.println("    Dominant signals: " + String.join(", ", interval.getDominantSignals()));
+            }
+
+            if (interval.getSupportingStats() != null) {
+                System.out.printf("    Supporting stats: head_dev=%.2f%%, gaze_dev=%.2f%%%n",
+                        interval.getSupportingStats().getHeadDeviationPct() * 100.0,
+                        interval.getSupportingStats().getGazeDeviationPct() * 100.0
+                );
             }
         }
     }
@@ -101,20 +86,27 @@ public class TerminalReporter {
         System.out.println(THIN_SEPARATOR);
         System.out.println("SUMMARY");
         System.out.println(THIN_SEPARATOR);
-        
-        if (response.isAutoDiscovered()) {
-            System.out.println("Seats discovered: " + response.getDiscoveredSeatCount());
-        }
-        
-        int totalStudents = response.getResults() != null ? response.getResults().size() : 0;
-        int flaggedStudents = response.getSuspiciousStudentCount();
+        int totalTracks = response.getResults() != null ? response.getResults().size() : 0;
+        int flaggedTracks = response.getSuspiciousStudentCount(); // legacy method name, but counts tracks
         int totalIntervals = response.getTotalSuspiciousIntervals();
 
-        System.out.println("Total students analyzed: " + totalStudents);
-        System.out.println("Students flagged: " + flaggedStudents);
+        System.out.println("Total tracks analyzed: " + totalTracks);
+        System.out.println("Tracks flagged: " + flaggedTracks);
         System.out.println("Total suspicious intervals: " + totalIntervals);
         System.out.println(SEPARATOR);
         System.out.println();
+
+        if (response.getAnnotatedVideo() != null) {
+            System.out.println("Annotated video:");
+            System.out.println("  status: " + response.getAnnotatedVideo().getStatus());
+            System.out.println("  path: " + response.getAnnotatedVideo().getFilePath());
+            if (response.getAnnotatedVideo().getResolution() != null) {
+                System.out.println("  resolution: " + response.getAnnotatedVideo().getResolution());
+            }
+            if (response.getAnnotatedVideo().getFrameRate() != null) {
+                System.out.println("  frame_rate: " + response.getAnnotatedVideo().getFrameRate());
+            }
+        }
     }
 
     /**

@@ -2,18 +2,23 @@
 Models module exports.
 """
 from .schemas import (
-    SeatMapping,
     AnalysisRequest,
-    SuspiciousInterval,
-    StudentResult,
-    DiscoveredSeatInfo,
     AnalysisResponse,
-    HealthResponse
+    HealthResponse,
+    AnalyzeJobCreateResponse,
+    JobStatusResponse,
+    JobResultResponse,
+    TrackResult,
+    SuspicionInterval,
 )
 
 __all__ = [
-    'SeatMapping',
-    'AnalysisRequest', 
-    'SuspiciousInterval',
-    'StudentResult',
-    'DiscoveredSeatInfo',
+    'AnalysisRequest',
+    'AnalysisResponse',
+    'HealthResponse',
+    'AnalyzeJobCreateResponse',
+    'JobStatusResponse',
+    'JobResultResponse',
+    'TrackResult',
+    'SuspicionInterval',
+]
