@@ -18,9 +18,6 @@ import java.nio.file.Paths;
  * Usage:
  *   java -jar anticheat.jar <config.json>
  *   java -jar anticheat.jar --video <path> --exam-id <id>
- *   java -jar anticheat.jar --video <path> --exam-id <id> --seat-map <path>
- * 
- * If --seat-map is not provided, auto-discovery mode is used.
  */
 public class Main {
     private static final TerminalReporter reporter = new TerminalReporter();
@@ -169,7 +166,7 @@ public class Main {
         System.out.println();
         System.out.println("Examples:");
         System.out.println();
-        System.out.println("  # Track-centric analysis (no seat map):");
+        System.out.println("  # Track-centric analysis:");
         System.out.println("  java -jar anticheat.jar --exam-id exam_001 --video /path/to/video.mp4");
         System.out.println();
         System.out.println("  # Using config file:");

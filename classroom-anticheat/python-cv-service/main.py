@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import threading
 import time
+import traceback
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -178,7 +179,18 @@ def _run_job(job_id: str, request_dict: Dict[str, Any]) -> None:
         else:
             _update_status(job_id, status="failed", progress=0.0, message="Results missing after run")
     except Exception as e:
-        _update_status(job_id, status="failed", progress=0.0, message=str(e), extra={"error": str(e)})
+        tb = traceback.format_exc()
+        print(f"[JobError] job_id={job_id} error={e}\n{tb}")
+        _update_status(
+            job_id,
+            status="failed",
+            progress=0.0,
+            message=str(e),
+            extra={
+                "error": str(e),
+                "traceback": tb,
+            },
+        )
     finally:
         _release_lock(job_id)
 
@@ -300,7 +312,7 @@ async def root():
         "service": "Classroom Anti-Cheat CV Service",
         "version": "1.0.0",
         "features": [
-            "Track-centric identity (per track_id; no fixed seat mapping)",
+            "Track-centric identity (per track_id)",
             "YOLOv8 person detection",
             "ByteTrack multi-object tracking",
             "MediaPipe head pose and gaze estimation",

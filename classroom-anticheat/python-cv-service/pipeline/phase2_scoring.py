@@ -115,12 +115,14 @@ class Phase2Scoring:
         phase1_stats = self._load_phase1_stats(features_jsonl_path)
         duration_sec = float(phase1_stats.get("duration_sec", self._load_video_duration_sec(features_jsonl_path)))
         fps_sampling = int(phase1_stats.get("fps_sampling", config.FPS_SAMPLING))
+        actual_sampling_rate = float(phase1_stats.get("actual_sampling_rate", fps_sampling))
         duration_ratio = float(np.clip(duration_sec / 3600.0, 0.1, 1.0))
 
-        alpha = float(config.EMA_ALPHA_FAST if fps_sampling >= 10 else config.EMA_ALPHA_BASE)
+        alpha = float(config.EMA_ALPHA_FAST if actual_sampling_rate >= 10 else config.EMA_ALPHA_BASE)
 
         effective_min_lifespan_sec = max(
-            2.0, float(config.MIN_TRACK_LIFESPAN_SEC) * duration_ratio
+            max(1.0, duration_sec * 0.10),
+            float(config.MIN_TRACK_LIFESPAN_SEC) * duration_ratio,
         )
         effective_baseline_window_sec = max(
             3.0, float(config.BASELINE_ROLLING_WINDOW_SEC) * duration_ratio
@@ -128,15 +130,20 @@ class Phase2Scoring:
         effective_min_baseline_samples = int(
             max(3, round(float(config.MIN_BASELINE_SAMPLES) * duration_ratio))
         )
-        effective_min_interval_duration_sec = max(
-            1.5, float(config.MIN_INTERVAL_DURATION_SEC) * duration_ratio
+        effective_teacher_min_age_sec = max(
+            5.0,
+            float(config.TEACHER_MIN_TRACK_AGE_SEC) * duration_ratio,
         )
+        effective_min_interval_duration_sec = float(np.clip(
+            max(0.5, duration_sec * 0.05),
+            0.5,
+            float(config.MIN_INTERVAL_DURATION_SEC),
+        ))
         effective_baseline_lock_sec = max(
-            3.0, float(config.BASELINE_LOCK_SEC) * duration_ratio
+            min(float(config.BASELINE_LOCK_MIN_SEC), duration_sec * 0.20),
+            float(config.BASELINE_LOCK_SEC) * duration_ratio,
         )
-        effective_alpha = float(
-            min(0.6, max(0.0, 1.0 - (1.0 - alpha) * duration_ratio))
-        )
+        effective_alpha = float(alpha)
 
         adjusted_enter_th = float(config.SUSPICION_ENTER_THRESHOLD)
         adjusted_exit_th = float(config.SUSPICION_EXIT_THRESHOLD)
@@ -147,9 +154,10 @@ class Phase2Scoring:
             f"effective_min_lifespan={effective_min_lifespan_sec:.2f}s, "
             f"effective_baseline_window={effective_baseline_window_sec:.2f}s, "
             f"effective_min_baseline_samples={effective_min_baseline_samples}, "
+            f"effective_teacher_min_age={effective_teacher_min_age_sec:.2f}s, "
             f"effective_min_interval_duration={effective_min_interval_duration_sec:.2f}s, "
             f"effective_baseline_lock={effective_baseline_lock_sec:.2f}s, "
-            f"fps_sampling={fps_sampling}, alpha={alpha:.3f}, "
+            f"fps_sampling={fps_sampling}, actual_sampling_rate={actual_sampling_rate:.3f}, alpha={alpha:.3f}, "
             f"effective_alpha={effective_alpha:.3f}, "
             f"raw_enter_th={self.enter_th:.3f}, raw_exit_th={self.exit_th:.3f}, "
             f"adjusted_enter_th={adjusted_enter_th:.3f}, adjusted_exit_th={adjusted_exit_th:.3f}"
@@ -207,11 +215,87 @@ class Phase2Scoring:
             ys = np.array([p[1] for p in pts], dtype=np.float64)
             spatial_var = float(np.var(xs) + np.var(ys))
             if (
-                float(track_meta.get(tid, {}).get("total_visible_duration_sec", 0.0)) >= float(config.TEACHER_MIN_TRACK_AGE_SEC)
+                float(track_meta.get(tid, {}).get("total_visible_duration_sec", 0.0)) >= effective_teacher_min_age_sec
                 and travel >= float(config.TEACHER_MIN_CUMULATIVE_TRAVEL_PX)
                 and spatial_var >= float(config.TEACHER_MIN_SPATIAL_VARIANCE)
             ):
                 teacher_candidates.append((tid, travel, spatial_var))
+
+        # Position-based teacher detection fallback.
+        frame_height = 0.0
+        for rec in feature_records[:20]:
+            bbox = rec.get("bbox")
+            if bbox and len(bbox) == 4:
+                frame_height = max(frame_height, float(bbox[3]))
+        if frame_height <= 0.0:
+            frame_height = 1080.0
+
+        if not teacher_candidates and frame_height > 0.0:
+            top_threshold = frame_height * float(config.TEACHER_POSITION_TOP_FRACTION)
+            bottom_threshold = frame_height * (1.0 - float(config.TEACHER_POSITION_TOP_FRACTION))
+
+            for tid, pts in centroids_by_track.items():
+                if len(pts) < 2:
+                    continue
+                median_y = float(np.median([p[1] for p in pts]))
+                is_front_or_back = (median_y < top_threshold or median_y > bottom_threshold)
+
+                travel = float(
+                    sum(
+                        np.sqrt((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2)
+                        for i in range(1, len(pts))
+                    )
+                )
+                track_age = float(track_meta.get(tid, {}).get("total_visible_duration_sec", 0.0))
+
+                if (
+                    is_front_or_back
+                    and travel >= float(config.TEACHER_POSITION_MIN_TRAVEL_FALLBACK_PX)
+                    and track_age >= effective_teacher_min_age_sec
+                ):
+                    xs = np.array([p[0] for p in pts], dtype=np.float64)
+                    ys = np.array([p[1] for p in pts], dtype=np.float64)
+                    spatial_var = float(np.var(xs) + np.var(ys))
+                    teacher_candidates.append((tid, travel, spatial_var))
+                    print(
+                        f"[Phase2] Teacher candidate (position-based): "
+                        f"track_id={tid}, median_y={median_y:.1f}, "
+                        f"top_thresh={top_threshold:.1f}, travel={travel:.1f}"
+                    )
+
+            # Secondary fallback for perspective-heavy frames where the invigilator
+            # may sit just outside the strict top/bottom 20% band.
+            if not teacher_candidates:
+                relaxed_top = top_threshold * 1.5
+                relaxed_bottom = frame_height - relaxed_top
+                for tid, pts in centroids_by_track.items():
+                    if len(pts) < 2:
+                        continue
+                    median_y = float(np.median([p[1] for p in pts]))
+                    is_edge_band = (median_y < relaxed_top or median_y > relaxed_bottom)
+                    if not is_edge_band:
+                        continue
+
+                    travel = float(
+                        sum(
+                            np.sqrt((pts[i][0] - pts[i - 1][0]) ** 2 + (pts[i][1] - pts[i - 1][1]) ** 2)
+                            for i in range(1, len(pts))
+                        )
+                    )
+                    track_age = float(track_meta.get(tid, {}).get("total_visible_duration_sec", 0.0))
+                    if (
+                        travel >= float(config.TEACHER_POSITION_MIN_TRAVEL_FALLBACK_PX)
+                        and track_age >= effective_teacher_min_age_sec
+                    ):
+                        xs = np.array([p[0] for p in pts], dtype=np.float64)
+                        ys = np.array([p[1] for p in pts], dtype=np.float64)
+                        spatial_var = float(np.var(xs) + np.var(ys))
+                        teacher_candidates.append((tid, travel, spatial_var))
+                        print(
+                            f"[Phase2] Teacher candidate (position-relaxed): "
+                            f"track_id={tid}, median_y={median_y:.1f}, "
+                            f"relaxed_top={relaxed_top:.1f}, travel={travel:.1f}"
+                        )
 
         teacher_track_id: Optional[int] = None
         teacher_travel = 0.0
@@ -457,6 +541,7 @@ class Phase2Scoring:
                     drift_signal = 0.0
                     head_dev_flag = 0
                     gaze_dev_flag = 0
+                    quality_gate_status = "ok"
 
                     pose_conf = 0.0
                     head_pose_conf = 0.0
@@ -470,14 +555,14 @@ class Phase2Scoring:
                         head_pose_conf = float(pose.get("head_pose_confidence", 0.0))
                         gaze_reliability = float(pose.get("gaze_reliability", 0.0))
 
-                    baseline_ok = (
+                    frame_usable = (
                         visibility_score >= float(config.MIN_FRAME_VISIBILITY_SCORE)
-                        and pose_conf >= float(config.MIN_POSE_CONFIDENCE)
                         and head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
-                        and gaze_reliability >= float(config.MIN_POSE_CONFIDENCE)
                     )
+                    head_signal_reliable = head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
+                    gaze_signal_reliable = gaze_reliability >= float(config.MIN_POSE_CONFIDENCE)
 
-                    if not baseline_ok:
+                    if not frame_usable:
                         stats["frames_low_visibility"] += 1
                     else:
                         baseline_calibration_ok = bool(config.BASELINE_UPDATE_DURING_SUSPICION) or (
@@ -503,28 +588,34 @@ class Phase2Scoring:
 
                     baseline_yaw, baseline_gaze, baseline_dist = _baseline_values(state)
                     baseline_yaw_long, _ = _long_baseline_values(state)
-                    baseline_ready = baseline_yaw is not None and baseline_gaze is not None
+                    abs_min = int(config.BASELINE_MIN_ABSOLUTE_SAMPLES)
+                    baseline_ready = (
+                        baseline_yaw is not None
+                        and baseline_gaze is not None
+                        and len(state.baseline_yaw) >= abs_min
+                    )
 
                     # 2) Compute signals and confidence-weighted score when possible.
                     if pose is not None and baseline_ready:
-                        quality_ok = (
-                            visibility_score >= float(config.MIN_FRAME_VISIBILITY_SCORE)
-                            and pose_conf >= float(config.MIN_POSE_CONFIDENCE)
-                            and head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
-                            and gaze_reliability >= float(config.MIN_POSE_CONFIDENCE)
-                        )
-
-                        if not quality_ok:
-                            stats["frames_low_visibility"] += 1
+                        if not frame_usable:
+                            quality_gate_status = f"fail:vis={visibility_score:.2f},head={head_pose_conf:.2f}"
                         else:
+                            quality_gate_status = "ok"
                             yaw = float(pose["yaw"])
                             gaze_x = float(pose["gaze_x"])
 
                             head_dev = abs(yaw - float(baseline_yaw))
                             gaze_dev = abs(gaze_x - float(baseline_gaze))
 
-                            head_signal = _clamp(head_dev / float(config.HEAD_DEV_NORM_DEG), 0.0, 1.0)
-                            gaze_signal = _clamp(gaze_dev / float(config.GAZE_DEV_NORM), 0.0, 1.0)
+                            if head_signal_reliable:
+                                head_signal = _clamp(head_dev / float(config.HEAD_DEV_NORM_DEG), 0.0, 1.0)
+                            else:
+                                head_signal = 0.0
+
+                            if gaze_signal_reliable:
+                                gaze_signal = _clamp(gaze_dev / float(config.GAZE_DEV_NORM), 0.0, 1.0)
+                            else:
+                                gaze_signal = 0.0
 
                             if baseline_dist is not None and nearest_distance is not None and baseline_dist > 0:
                                 threshold = float(baseline_dist) * float(config.PROXIMITY_DISTANCE_RATIO_THRESHOLD)
@@ -550,6 +641,10 @@ class Phase2Scoring:
                             estimation_mode = rec.get("estimation_mode")
                             if estimation_mode == "bbox_proxy_face_not_visible":
                                 raw_signal_score = _clamp(raw_signal_score * 0.5, 0.0, 1.0)
+                            elif estimation_mode == "body_pose_landmarks":
+                                pass
+                            elif estimation_mode == "profile_face_detected":
+                                pass
 
                             occlusion_clarity = float(1.0 - occlusion_score)
                             confidence_weight_mean = (
@@ -579,6 +674,10 @@ class Phase2Scoring:
                             head_dev_flag = 1 if head_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
                             gaze_dev_flag = 1 if gaze_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
                     else:
+                        if not frame_usable:
+                            quality_gate_status = f"fail:vis={visibility_score:.2f},head={head_pose_conf:.2f}"
+                        elif not baseline_ready:
+                            quality_gate_status = "fail:baseline_not_ready"
                         stats["frames_baseline_not_ready"] += 1
 
                     bbox = rec.get("bbox")
@@ -595,6 +694,7 @@ class Phase2Scoring:
                             "visibility_score": float(visibility_score),
                             "occlusion_score": float(occlusion_score),
                             "gaze_reliability": float(gaze_reliability),
+                            "quality_gate_status": str(quality_gate_status),
                             "raw_signal_score": float(raw_signal_score),
                             "confidence_weight": float(confidence_weight),
                             "final_score_pre": float(final_score_pre),
@@ -605,6 +705,7 @@ class Phase2Scoring:
                             "head_dev_flag": int(head_dev_flag),
                             "gaze_dev_flag": int(gaze_dev_flag),
                             "centroid": centroid,
+                            "baseline_yaw_len": len(state.baseline_yaw),
                             "suppressed_whole_class_event": False,
                             "suppressed_teacher_proximity": False,
                             "estimation_mode": rec.get("estimation_mode"),
@@ -616,10 +717,20 @@ class Phase2Scoring:
                 flagged_count = sum(
                     1 for item in frame_items if float(item["raw_signal_score"]) > sim_signal_th
                 )
+                tracks_with_mature_baseline = sum(
+                    1 for item in frame_items
+                    if bool(item["baseline_ready"]) and int(item.get("baseline_yaw_len", 0)) >= 8
+                )
+                baseline_mature_fraction = (
+                    float(tracks_with_mature_baseline) / float(active_track_count)
+                    if active_track_count > 0
+                    else 0.0
+                )
                 whole_class_event = (
                     active_track_count >= sim_min_tracks
                     and active_track_count > 0
                     and (float(flagged_count) / float(active_track_count)) >= sim_fraction
+                    and baseline_mature_fraction >= 0.5
                 )
                 if whole_class_event:
                     for item in frame_items:
@@ -665,6 +776,7 @@ class Phase2Scoring:
                                     "visibility_score": float(item["visibility_score"]),
                                     "occlusion_score": float(item["occlusion_score"]),
                                     "gaze_reliability": float(item["gaze_reliability"]),
+                                    "quality_gate_status": str(item.get("quality_gate_status", "ok")),
                                     "estimation_mode": item.get("estimation_mode"),
                                     "suppressed_whole_class_event": bool(item["suppressed_whole_class_event"]),
                                     "suppressed_teacher_proximity": bool(item["suppressed_teacher_proximity"]),

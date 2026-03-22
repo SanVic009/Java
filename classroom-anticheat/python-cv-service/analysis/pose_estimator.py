@@ -27,7 +27,7 @@ class PoseEstimate:
     confidence: float  # combined 0..1
     pose_keypoints_2d: List[List[float]]  # 2D points used for PnP (crop-local pixels)
     face_visible: bool  # face detector indicates visible face
-    estimation_mode: str  # mediapipe_face_crop | coarse_face_fallback | bbox_proxy_face_not_visible
+    estimation_mode: str  # mediapipe_face_crop | profile_face_detected | coarse_face_fallback | body_pose_landmarks | bbox_proxy_face_not_visible
     face_detect_confidence: float  # 0..1
     bbox_aspect_ratio: float  # width / height of person bbox
     bbox_orientation_deg: float  # coarse orientation proxy from bbox/crop
@@ -76,11 +76,21 @@ class PoseEstimator:
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_detection_confidence
         )
+        self.mp_pose = mp.solutions.pose
+        self.body_pose = self.mp_pose.Pose(
+            static_image_mode=True,
+            model_complexity=0,
+            enable_segmentation=False,
+            min_detection_confidence=0.4,
+        )
 
         self.min_face_crop_px = int(getattr(config, "MIN_FACE_CROP_PX", 35))
         self._face_detector, self._face_detector_name = self._init_face_detector()
         self._haar = cv2.CascadeClassifier(
             cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        self._haar_profile = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_profileface.xml"
         )
         
         # 3D model points for pose estimation (generic face model)
@@ -94,6 +104,7 @@ class PoseEstimator:
         ], dtype=np.float64)
         
         print(f"[PoseEstimator] Initialized (detector={self._face_detector_name}, min_face_crop_px={self.min_face_crop_px})")
+        print("[PoseEstimator] Body pose estimator initialized (model_complexity=0)")
     
     def estimate(
         self, 
@@ -140,6 +151,16 @@ class PoseEstimator:
             fx, fy, fw, fh = face["bbox"]
             face_conf = float(face.get("confidence", 0.0))
             keypoints = face.get("keypoints", {})
+
+            if bool(face.get("is_profile", False)):
+                return self._profile_pose_from_detection(
+                    fw=fw,
+                    fh=fh,
+                    detect_conf=face_conf,
+                    yaw_sign=float(face.get("profile_yaw_sign", 1.0)),
+                    bbox_aspect_ratio=bbox_aspect_ratio,
+                    bbox_orientation_deg=bbox_orientation_deg,
+                )
 
             if min(fw, fh) >= self.min_face_crop_px:
                 # Run MediaPipe only on confirmed face region.
@@ -200,8 +221,19 @@ class PoseEstimator:
                 bbox_orientation_deg=bbox_orientation_deg,
             )
 
-        # No face found. Keep frame usable with a low-confidence bbox proxy when detection is valid.
+        # No face found.
+        # Try body-landmark head direction first (works for seated/downward head poses).
         if float(detection_confidence) >= float(getattr(config, "MIN_TRACK_CONFIDENCE", 0.35)):
+            body_est = self._estimate_from_body_landmarks(
+                frame=frame,
+                bbox=bbox,
+                bbox_aspect_ratio=bbox_aspect_ratio,
+                bbox_orientation_deg=bbox_orientation_deg,
+            )
+            if body_est is not None:
+                return body_est
+
+            # Body pose also failed — fallback to bbox proxy.
             return self._coarse_pose_from_bbox(
                 bbox_w=crop_w,
                 bbox_h=crop_h,
@@ -278,27 +310,250 @@ class PoseEstimator:
         # Haar fallback (no explicit confidence/keypoints from detector).
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         faces = self._haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(25, 25))
-        if len(faces) == 0:
+        if len(faces) > 0:
+            # Choose largest face candidate.
+            x, y, fw, fh = max(faces, key=lambda b: int(b[2] * b[3]))
+            x = int(max(0, x))
+            y = int(max(0, y))
+            fw = int(max(1, min(fw, w - x)))
+            fh = int(max(1, min(fh, h - y)))
+            if fw / max(fh, 1) >= 0.6 and fw / max(fh, 1) <= 1.4:
+                return {
+                    "bbox": (x, y, fw, fh),
+                    "confidence": 0.55,
+                    "keypoints": {
+                        "left_eye": (x + 0.35 * fw, y + 0.42 * fh),
+                        "right_eye": (x + 0.65 * fw, y + 0.42 * fh),
+                        "nose": (x + 0.50 * fw, y + 0.56 * fh),
+                        "left_mouth": (x + 0.40 * fw, y + 0.72 * fh),
+                        "right_mouth": (x + 0.60 * fw, y + 0.72 * fh),
+                    },
+                }
+
+        # Profile fallback: detect left/right profile via original+flipped crop.
+        for flip, sign in [(False, 1.0), (True, -1.0)]:
+            img = cv2.flip(gray, 1) if flip else gray
+            faces = self._haar_profile.detectMultiScale(
+                img,
+                scaleFactor=1.1,
+                minNeighbors=4,
+                minSize=(20, 20),
+            )
+            if len(faces) == 0:
+                continue
+
+            x, y, fw, fh = max(faces, key=lambda b: int(b[2] * b[3]))
+            if fw / max(fh, 1) > 1.2:
+                continue
+
+            if flip:
+                x = int(w - (x + fw))
+
+            x = int(max(0, x))
+            y = int(max(0, y))
+            fw = int(max(1, min(fw, w - x)))
+            fh = int(max(1, min(fh, h - y)))
+
+            eye_x = float(x + fw * 0.55)
+            eye_y = float(y + fh * 0.38)
+            return {
+                "bbox": (x, y, fw, fh),
+                "confidence": 0.52,
+                "is_profile": True,
+                "profile_yaw_sign": float(sign),
+                "keypoints": {
+                    "left_eye": (eye_x, eye_y),
+                    "right_eye": (eye_x, eye_y),
+                    "nose": (float(x + fw * 0.80), float(y + fh * 0.55)),
+                    "left_mouth": (float(x + fw * 0.70), float(y + fh * 0.75)),
+                    "right_mouth": (float(x + fw * 0.80), float(y + fh * 0.75)),
+                },
+            }
+
+        return None
+
+    def _profile_pose_from_detection(
+        self,
+        fw: int,
+        fh: int,
+        detect_conf: float,
+        yaw_sign: float,
+        bbox_aspect_ratio: float,
+        bbox_orientation_deg: float,
+    ) -> PoseEstimate:
+        """
+        Pose estimate when a profile face is detected.
+        """
+        yaw = float(yaw_sign * 75.0)
+        pitch = 0.0
+        roll = 0.0
+
+        size_conf = float(np.clip(min(fw, fh) / float(max(self.min_face_crop_px, 1) * 2), 0.0, 1.0))
+        head_pose_confidence = float(np.clip(0.50 + 0.30 * detect_conf + 0.20 * size_conf, 0.0, 0.85))
+        landmark_visibility = float(np.clip(0.55 + 0.30 * size_conf, 0.0, 0.85))
+        gaze_reliability = 0.20
+
+        gaze_x = float(yaw_sign * 1.0)
+        gaze_y = 0.0
+
+        confidence = self._combine_confidences(
+            landmark_visibility,
+            head_pose_confidence,
+            gaze_reliability,
+            mode="coarse_face_fallback",
+        )
+
+        return PoseEstimate(
+            yaw=yaw,
+            pitch=pitch,
+            roll=roll,
+            gaze_x=gaze_x,
+            gaze_y=gaze_y,
+            landmark_visibility=landmark_visibility,
+            head_pose_confidence=head_pose_confidence,
+            gaze_reliability=gaze_reliability,
+            confidence=confidence,
+            pose_keypoints_2d=[],
+            face_visible=True,
+            estimation_mode="profile_face_detected",
+            face_detect_confidence=float(np.clip(detect_conf, 0.0, 1.0)),
+            bbox_aspect_ratio=float(bbox_aspect_ratio),
+            bbox_orientation_deg=float(bbox_orientation_deg),
+        )
+
+    def _estimate_from_body_landmarks(
+        self,
+        frame: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        bbox_aspect_ratio: float,
+        bbox_orientation_deg: float,
+    ) -> Optional[PoseEstimate]:
+        """
+        Estimate head direction from MediaPipe Pose body landmarks.
+        """
+        x1, y1, x2, y2 = bbox
+        h, w = frame.shape[:2]
+
+        pad = int((y2 - y1) * 0.05)
+        cx1 = max(0, x1 - pad)
+        cy1 = max(0, y1 - pad)
+        cx2 = min(w, x2 + pad)
+        cy2 = min(h, y2 + pad)
+
+        crop = frame[cy1:cy2, cx1:cx2]
+        if crop.size == 0:
             return None
-        # Choose largest face candidate.
-        x, y, fw, fh = max(faces, key=lambda b: int(b[2] * b[3]))
-        x = int(max(0, x))
-        y = int(max(0, y))
-        fw = int(max(1, min(fw, w - x)))
-        fh = int(max(1, min(fh, h - y)))
-        if fw / max(fh, 1) < 0.6 or fw / max(fh, 1) > 1.4:
+
+        crop_h, crop_w = crop.shape[:2]
+        if crop_h < 20 or crop_w < 20:
             return None
-        return {
-            "bbox": (x, y, fw, fh),
-            "confidence": 0.55,
-            "keypoints": {
-                "left_eye": (x + 0.35 * fw, y + 0.42 * fh),
-                "right_eye": (x + 0.65 * fw, y + 0.42 * fh),
-                "nose": (x + 0.50 * fw, y + 0.56 * fh),
-                "left_mouth": (x + 0.40 * fw, y + 0.72 * fh),
-                "right_mouth": (x + 0.60 * fw, y + 0.72 * fh),
-            },
-        }
+
+        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+        try:
+            results = self.body_pose.process(rgb_crop)
+        except Exception:
+            return None
+
+        if not results.pose_landmarks:
+            return None
+
+        lms = results.pose_landmarks.landmark
+
+        NOSE = 0
+        LEFT_EAR = 7
+        RIGHT_EAR = 8
+        LEFT_SHOULDER = 11
+        RIGHT_SHOULDER = 12
+
+        nose = lms[NOSE]
+        l_ear = lms[LEFT_EAR]
+        r_ear = lms[RIGHT_EAR]
+        l_shldr = lms[LEFT_SHOULDER]
+        r_shldr = lms[RIGHT_SHOULDER]
+
+        MIN_VIS = 0.4
+        if l_shldr.visibility < MIN_VIS or r_shldr.visibility < MIN_VIS:
+            return None
+        if nose.visibility < MIN_VIS:
+            return None
+
+        nose_x = nose.x * crop_w
+        nose_y = nose.y * crop_h
+        l_shldr_x = l_shldr.x * crop_w
+        l_shldr_y = l_shldr.y * crop_h
+        r_shldr_x = r_shldr.x * crop_w
+        r_shldr_y = r_shldr.y * crop_h
+
+        shldr_mid_x = (l_shldr_x + r_shldr_x) / 2.0
+        shldr_mid_y = (l_shldr_y + r_shldr_y) / 2.0
+
+        shldr_width = abs(r_shldr_x - l_shldr_x)
+        if shldr_width < 5.0:
+            return None
+
+        lateral_offset = (nose_x - shldr_mid_x) / (shldr_width * 0.5 + 1e-6)
+        yaw = float(np.clip(
+            lateral_offset * float(getattr(config, "BODY_POSE_YAW_SCALE_DEG", 35.0)),
+            -75.0,
+            75.0,
+        ))
+
+        expected_head_height = shldr_width * 0.8
+        vertical_offset = (shldr_mid_y - nose_y) / (expected_head_height + 1e-6)
+        pitch = float(np.clip(vertical_offset * 30.0, -60.0, 30.0))
+
+        shldr_angle_rad = np.arctan2(r_shldr_y - l_shldr_y, r_shldr_x - l_shldr_x)
+        roll = float(np.degrees(shldr_angle_rad))
+
+        l_ear_vis = float(l_ear.visibility)
+        r_ear_vis = float(r_ear.visibility)
+        nose_vis = float(nose.visibility)
+        shldr_vis = float((l_shldr.visibility + r_shldr.visibility) / 2.0)
+
+        max_ear_vis = max(l_ear_vis, r_ear_vis)
+        head_pose_confidence = float(np.clip(
+            0.4 * nose_vis + 0.4 * max_ear_vis + 0.2 * shldr_vis,
+            0.0,
+            0.80,
+        ))
+        landmark_visibility = float(np.clip(
+            0.5 * nose_vis + 0.3 * max_ear_vis + 0.2 * shldr_vis,
+            0.0,
+            0.85,
+        ))
+
+        gaze_reliability = 0.0
+        gaze_x = 0.0
+        gaze_y = 0.0
+
+        confidence = self._combine_confidences(
+            landmark_visibility,
+            head_pose_confidence,
+            gaze_reliability,
+            mode="body_pose_landmarks",
+        )
+
+        return PoseEstimate(
+            yaw=yaw,
+            pitch=pitch,
+            roll=roll,
+            gaze_x=gaze_x,
+            gaze_y=gaze_y,
+            landmark_visibility=landmark_visibility,
+            head_pose_confidence=head_pose_confidence,
+            gaze_reliability=gaze_reliability,
+            confidence=confidence,
+            pose_keypoints_2d=[
+                [float(nose_x), float(nose_y)],
+                [float(l_shldr_x), float(l_shldr_y)],
+                [float(r_shldr_x), float(r_shldr_y)],
+            ],
+            face_visible=False,
+            estimation_mode="body_pose_landmarks",
+            face_detect_confidence=0.0,
+            bbox_aspect_ratio=bbox_aspect_ratio,
+            bbox_orientation_deg=bbox_orientation_deg,
+        )
 
     def _coarse_pose_from_face(
         self,
@@ -470,6 +725,8 @@ class PoseEstimator:
             base *= 0.88
         elif mode == "bbox_proxy_face_not_visible":
             base *= 0.82
+        elif mode == "body_pose_landmarks":
+            base *= 0.92
         return float(np.clip(base, 0.0, 1.0))
     
     def _compute_landmark_visibility(self, landmarks) -> float:
@@ -658,3 +915,4 @@ class PoseEstimator:
     def close(self):
         """Release resources."""
         self.face_mesh.close()
+        self.body_pose.close()

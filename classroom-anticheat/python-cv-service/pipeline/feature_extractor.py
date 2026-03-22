@@ -59,6 +59,57 @@ class FeatureExtractorPhase1:
         self.detector = PersonDetector(confidence=config.YOLO_CONFIDENCE)
         self.tracker: Optional[ByteTracker] = None
         self.pose_estimator = PoseEstimator()
+        self._prev_gray: Optional[np.ndarray] = None
+
+    def _estimate_global_motion(
+        self,
+        prev_gray: np.ndarray,
+        curr_gray: np.ndarray,
+    ) -> Tuple[float, float]:
+        """
+        Estimate (dx, dy) global translation between two grayscale frames
+        using sparse Lucas-Kanade optical flow on good keypoints.
+        Returns (0.0, 0.0) on failure or insufficient points.
+        """
+        if prev_gray is None or prev_gray.shape != curr_gray.shape:
+            return 0.0, 0.0
+
+        prev_pts = cv2.goodFeaturesToTrack(
+            prev_gray,
+            maxCorners=200,
+            qualityLevel=0.01,
+            minDistance=10,
+            blockSize=3,
+        )
+        if prev_pts is None or len(prev_pts) < 8:
+            return 0.0, 0.0
+
+        curr_pts, status, _ = cv2.calcOpticalFlowPyrLK(
+            prev_gray,
+            curr_gray,
+            prev_pts,
+            None,
+            winSize=(21, 21),
+            maxLevel=3,
+            criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
+        )
+
+        if curr_pts is None or status is None:
+            return 0.0, 0.0
+
+        good_prev = prev_pts[status.ravel() == 1]
+        good_curr = curr_pts[status.ravel() == 1]
+        if len(good_prev) < 4:
+            return 0.0, 0.0
+
+        displacements = (good_curr - good_prev).reshape(-1, 2)
+        dx = float(np.median(displacements[:, 0]))
+        dy = float(np.median(displacements[:, 1]))
+
+        if abs(dx) > 200.0 or abs(dy) > 200.0:
+            return 0.0, 0.0
+
+        return dx, dy
 
     def extract(
         self,
@@ -85,6 +136,7 @@ class FeatureExtractorPhase1:
         duration_sec = total_frames / original_fps if original_fps and original_fps > 0 else 0.0
 
         frame_skip = max(1, int(original_fps / float(fps_sampling))) if original_fps else 1
+        actual_sampling_rate = float(original_fps) / float(frame_skip) if frame_skip > 0 and original_fps else float(fps_sampling)
         sampled_frames = total_frames // frame_skip if frame_skip else 0
 
         # Tracker stores identity & stability. We give it fps_sampling to reason about ID-switch lookback.
@@ -92,7 +144,9 @@ class FeatureExtractorPhase1:
             fps_sampling=float(fps_sampling),
             id_switch_distance_px=config.ID_SWITCH_DISTANCE_PX,
             id_switch_lookback_sec=config.ID_SWITCH_LOOKBACK_SEC,
+            track_buffer=int(config.TRACKER_TRACK_BUFFER),
         )
+        self._prev_gray = None
 
         # Track meta built online from persisted features.
         track_meta: Dict[int, Dict[str, Any]] = {}
@@ -105,6 +159,7 @@ class FeatureExtractorPhase1:
             "total_frames": total_frames,
             "duration_sec": duration_sec,
             "fps_sampling": fps_sampling,
+            "actual_sampling_rate": actual_sampling_rate,
             "frame_skip": frame_skip,
             "sampled_frames_estimate": sampled_frames,
             "frames_read": 0,
@@ -140,6 +195,10 @@ class FeatureExtractorPhase1:
                         timestamp = float(frame_idx) / float(original_fps) if original_fps else 0.0
                         stats["frames_sampled"] += 1
 
+                        curr_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        gmc_dx, gmc_dy = self._estimate_global_motion(self._prev_gray, curr_gray)
+                        self._prev_gray = curr_gray
+
                         detections: List[Detection] = self.detector.detect(frame)
                         if detections:
                             stats["frames_with_any_detection"] += 1
@@ -148,7 +207,11 @@ class FeatureExtractorPhase1:
                             float(np.mean([d.confidence for d in detections])) if detections else 0.0
                         )
 
-                        tracks: List[Track] = self.tracker.update(detections, frame_idx=sample_idx)
+                        tracks: List[Track] = self.tracker.update(
+                            detections,
+                            frame_idx=sample_idx,
+                            global_motion=(gmc_dx, gmc_dy),
+                        )
 
                         visible_tracks = [t for t in tracks if t.time_since_update == 0]
 
@@ -195,7 +258,7 @@ class FeatureExtractorPhase1:
                                     stats["pose_frames_succeeded"] += 1
                                     stats["avg_pose_confidence_sum"] += float(pose.confidence)
                                     stats["avg_pose_landmark_visibility_sum"] += float(pose.landmark_visibility)
-                                    visibility_score = float(np.clip(pose.landmark_visibility * (1.0 - occlusion_score), 0.0, 1.0))
+                                    visibility_score = float(np.clip(pose.landmark_visibility, 0.0, 1.0))
 
                                     pose_payload = {
                                         "yaw": pose.yaw,
@@ -337,7 +400,7 @@ class FeatureExtractorPhase1:
 
         # Convert visible frames to duration seconds.
         for _, meta in track_meta.items():
-            meta["total_visible_duration_sec"] = float(meta["total_visible_frames"]) / float(fps_sampling)
+            meta["total_visible_duration_sec"] = float(meta["total_visible_frames"]) / float(actual_sampling_rate)
             denom = meta["visible_frames_for_conf_avg"]
             meta["avg_tracking_confidence"] = (
                 float(meta["avg_tracking_confidence_sum"]) / float(denom) if denom > 0 else 0.0

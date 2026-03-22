@@ -183,7 +183,6 @@ class VideoProcessor:
             }
 
             # Persist initial placeholder so clients polling /result can see progress.
-            import json
             results_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
             def _render_bg():
@@ -221,7 +220,6 @@ class VideoProcessor:
 
     @staticmethod
     def _read_results_json(results_path: Path) -> Dict[str, Any]:
-        import json
         if not results_path.exists():
             return {}
         return json.loads(results_path.read_text(encoding="utf-8"))

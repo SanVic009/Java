@@ -8,7 +8,6 @@ from dataclasses import dataclass, field
 from scipy.optimize import linear_sum_assignment
 from filterpy.kalman import KalmanFilter
 
-
 @dataclass
 class Track:
     """Single tracked object."""
@@ -110,7 +109,7 @@ class Track:
         if self.age <= 0:
             return 0.0
         presence = float(self.hits) / float(self.age)
-        id_factor = 1.0 / (1.0 + float(self.id_switch_count))
+        id_factor = 1.0 / (1.0 + float(self.id_switch_count) ** 0.5)
         return float(np.clip(presence * id_factor, 0.0, 1.0))
 
 
@@ -123,7 +122,7 @@ class ByteTracker:
     def __init__(
         self,
         track_thresh: float = 0.5,
-        track_buffer: int = 10,
+        track_buffer: int = 20,
         match_thresh: float = 0.35,
         fps_sampling: float = 5.0,
         id_switch_distance_px: float = 60.0,
@@ -156,7 +155,12 @@ class ByteTracker:
         
         print(f"[Tracker] Initialized ByteTracker with buffer={track_buffer}")
     
-    def update(self, detections: List['Detection'], frame_idx: Optional[int] = None) -> List[Track]:
+    def update(
+        self,
+        detections: List['Detection'],
+        frame_idx: Optional[int] = None,
+        global_motion: Tuple[float, float] = (0.0, 0.0),
+    ) -> List[Track]:
         """
         Update tracker with new detections.
         
@@ -172,10 +176,17 @@ class ByteTracker:
         else:
             self._frame_idx = frame_idx
 
+        gmc_dx, gmc_dy = float(global_motion[0]), float(global_motion[1])
+
+        REID_MAX_DISTANCE_PX = 250.0
+        REID_MAX_LOST_FRAMES = 15
+
         if not detections:
             # Mark all tracks as missed
             for track in self.tracks:
                 track.predict()
+                track.kf.x[0] += gmc_dx
+                track.kf.x[1] += gmc_dy
                 track.mark_missed(frame_idx)
             self._handle_lost_tracks()
             return self.tracks
@@ -184,7 +195,16 @@ class ByteTracker:
         high_dets = [d for d in detections if d.confidence >= self.track_thresh]
         low_dets = [d for d in detections if d.confidence < self.track_thresh]
 
-        predicted_bboxes = {track.track_id: track.predict() for track in self.tracks}
+        predicted_bboxes = {}
+        for track in self.tracks:
+            pb = track.predict()
+            x1, y1, x2, y2 = pb
+            predicted_bboxes[track.track_id] = (
+                int(x1 + gmc_dx),
+                int(y1 + gmc_dy),
+                int(x2 + gmc_dx),
+                int(y2 + gmc_dy),
+            )
         
         # First association: high confidence detections with active tracks
         unmatched_tracks, unmatched_dets = self._associate(
@@ -202,9 +222,6 @@ class ByteTracker:
             unmatched_tracks = [unmatched_tracks[i] for i in still_unmatched]
 
         # Third association pass: try to re-identify recently lost tracks.
-        REID_MAX_DISTANCE_PX = 80.0
-        REID_MAX_LOST_FRAMES = 15
-
         if unmatched_dets and self.lost_tracks:
             for det_idx in list(unmatched_dets):
                 det = high_dets[det_idx]
@@ -224,6 +241,8 @@ class ByteTracker:
                 if best_lost is not None:
                     best_lost.update(det.bbox, det.confidence, frame_idx)
                     best_lost.time_since_update = 0
+                    best_lost.id_switch_count = int(best_lost.id_switch_count) + 1
+                    self.id_switch_events += 1
                     self.tracks.append(best_lost)
                     self.lost_tracks.remove(best_lost)
                     unmatched_dets.remove(det_idx)
@@ -304,12 +323,18 @@ class ByteTracker:
         for row, col in zip(row_indices, col_indices):
             iou_ok = iou_matrix[row, col] >= self.match_thresh
             if not iou_ok:
-                cx1, cy1 = tracks[row].centroid
-                cx2, cy2 = detections[col].centroid[0], detections[col].centroid[1]
-                dist = float(np.sqrt((cx1 - cx2) ** 2 + (cy1 - cy2) ** 2))
+                if predicted_bboxes is not None and tracks[row].track_id in predicted_bboxes:
+                    pb = predicted_bboxes[tracks[row].track_id]
+                    pcx = (pb[0] + pb[2]) / 2.0
+                    pcy = (pb[1] + pb[3]) / 2.0
+                else:
+                    pcx, pcy = float(tracks[row].centroid[0]), float(tracks[row].centroid[1])
+
+                cx2, cy2 = float(detections[col].centroid[0]), float(detections[col].centroid[1])
+                dist = float(np.sqrt((pcx - cx2) ** 2 + (pcy - cy2) ** 2))
                 x1, y1, x2, y2 = tracks[row].bbox
                 diag = float(np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2))
-                centroid_ok = dist <= (diag * 0.15)
+                centroid_ok = dist <= (diag * 0.60)
             else:
                 centroid_ok = False
 

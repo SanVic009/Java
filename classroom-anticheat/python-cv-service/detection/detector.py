@@ -1,11 +1,13 @@
 """
 YOLOv8-based person detection.
 """
+import os
 from pathlib import Path
 from ultralytics import YOLO
 import numpy as np
 from typing import List, Tuple
 from dataclasses import dataclass
+import torch
 
 from config import config
 
@@ -54,6 +56,16 @@ class PersonDetector:
             confidence: Minimum confidence threshold
         """
         model_path = _resolve_model_path(model_name)
+        os.environ.setdefault("TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD", "1")
+        # PyTorch 2.6 changed torch.load(weights_only=True) default behavior.
+        # Ultralytics model checkpoints require trusted class allow-listing.
+        try:
+            if hasattr(torch, "serialization") and hasattr(torch.serialization, "add_safe_globals"):
+                torch.serialization.add_safe_globals([torch.nn.modules.container.Sequential])
+        except Exception:
+            # Fallback to standard loading path; if environment doesn't support this API,
+            # Ultralytics/torch defaults will still be attempted.
+            pass
         self.model = YOLO(model_path)
         self.confidence = confidence
         self.nms_iou_threshold = float(getattr(config, "NMS_IOU_THRESHOLD", 0.45))
@@ -61,6 +73,9 @@ class PersonDetector:
 
     def _filter_detections(self, detections: List[Detection]) -> List[Detection]:
         filtered: List[Detection] = []
+        min_area = float(config.MIN_PERSON_BOX_AREA)
+        min_aspect = float(config.MIN_PERSON_ASPECT_RATIO)
+        max_aspect = float(config.MAX_PERSON_ASPECT_RATIO)
         for det in detections:
             x1, y1, x2, y2 = det.bbox
             w = x2 - x1
@@ -68,11 +83,11 @@ class PersonDetector:
             area = w * h
             aspect = h / max(w, 1)
 
-            if area < float(config.MIN_PERSON_BOX_AREA):
+            if area < min_area:
                 continue
-            if aspect < float(config.MIN_PERSON_ASPECT_RATIO):
+            if aspect < min_aspect:
                 continue
-            if aspect > float(config.MAX_PERSON_ASPECT_RATIO):
+            if aspect > max_aspect:
                 continue
             filtered.append(det)
         return filtered

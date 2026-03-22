@@ -1,0 +1,13 @@
+# Runtime job outputs
+job_store/
+python-cv-service/job_store/
+java-orchestrator/job_store/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Build artifacts
+target/
+node_modules/
+dist/

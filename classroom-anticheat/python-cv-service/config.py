@@ -19,10 +19,11 @@ class Config:
     PROXIMITY_RATIO: float = 0.7
     
     # Signal weights (must sum to 1.0)
-    HEAD_WEIGHT: float = 0.33
-    GAZE_WEIGHT: float = 0.20
-    PROXIMITY_WEIGHT: float = 0.32
-    DRIFT_WEIGHT: float = 0.15
+    # Rebalanced so head+gaze-only behavior can still exceed suspicion thresholds.
+    HEAD_WEIGHT: float = 0.45
+    GAZE_WEIGHT: float = 0.28
+    PROXIMITY_WEIGHT: float = 0.17
+    DRIFT_WEIGHT: float = 0.10
 
     # Backward-compatible aliases
     WEIGHT_HEAD: float = HEAD_WEIGHT
@@ -39,15 +40,15 @@ class Config:
     # Interval merging
     MERGE_GAP_SEC: float = 5.0
     
-    # Seat assignment stabilization
+    # Assignment stabilization
     STABILIZATION_FRAMES: int = 10
     
     # Detection confidence
     YOLO_CONFIDENCE: float = 0.5
     MIN_DETECTION_CONFIDENCE: float = 0.60
     NMS_IOU_THRESHOLD: float = 0.45
-    MIN_PERSON_BOX_AREA: float = 2500.0
-    MIN_PERSON_ASPECT_RATIO: float = 1.1
+    MIN_PERSON_BOX_AREA: float = 1600.0
+    MIN_PERSON_ASPECT_RATIO: float = 0.75
     MAX_PERSON_ASPECT_RATIO: float = 4.5
 
     # Pose estimator pre-gate (do not run face landmarks for tiny faces)
@@ -59,7 +60,7 @@ class Config:
 
     # Track-centric identity & quality gates
     MIN_TRACK_LIFESPAN_SEC: float = 10.0
-    TRACK_STABILITY_MIN_SCORE: float = 0.45  # 0..1
+    TRACK_STABILITY_MIN_SCORE: float = 0.30  # 0..1
     MIN_FRAME_VISIBILITY_SCORE: float = 0.45  # derived from pose landmark visibility and occlusion
     MIN_POSE_CONFIDENCE: float = 0.45
     MIN_TRACK_CONFIDENCE: float = 0.35
@@ -67,6 +68,8 @@ class Config:
     # Rolling baseline (track-specific, uncertainty-aware)
     BASELINE_ROLLING_WINDOW_SEC: float = 30.0
     BASELINE_LOCK_SEC: float = 60.0
+    BASELINE_LOCK_MIN_SEC: float = 15.0
+    BASELINE_MIN_ABSOLUTE_SAMPLES: int = 10
     BASELINE_UPDATE_DURING_SUSPICION: bool = False
     MIN_BASELINE_SAMPLES: int = 5  # number of accepted samples per rolling baseline
 
@@ -76,6 +79,7 @@ class Config:
     SIGNAL_FLAG_THRESHOLD: float = 0.6
     GAZE_X_SCALE_FACTOR: float = 2.0
     PROXIMITY_DISTANCE_RATIO_THRESHOLD: float = 0.7  # current_dist < baseline_dist * ratio triggers proximity anomaly
+    BODY_POSE_YAW_SCALE_DEG: float = 35.0
 
     # Temporal aggregation (robust hysteresis + smoothing)
     EMA_ALPHA_BASE: float = 0.2
@@ -88,8 +92,8 @@ class Config:
 
     # Backward-compatible alias
     EMA_ALPHA: float = EMA_ALPHA_BASE
-    SUSPICION_ENTER_THRESHOLD: float = 0.6
-    SUSPICION_EXIT_THRESHOLD: float = 0.45
+    SUSPICION_ENTER_THRESHOLD: float = 0.45
+    SUSPICION_EXIT_THRESHOLD: float = 0.30
     MIN_INTERVAL_DURATION_SEC: float = 3.0
     MIN_INTERVAL_AVG_CONFIDENCE: float = 0.33
 
@@ -101,17 +105,19 @@ class Config:
     # SUSPICION_ENTER_THRESHOLD and SUSPICION_EXIT_THRESHOLD.
 
     # Phase 2 teacher/event suppression heuristics
-    TEACHER_MIN_CUMULATIVE_TRAVEL_PX: float = 2000.0   # must satisfy BOTH conditions
+    TEACHER_MIN_CUMULATIVE_TRAVEL_PX: float = 800.0   # must satisfy BOTH conditions
     TEACHER_MIN_SPATIAL_VARIANCE: float = 15000.0      # must satisfy BOTH conditions
     TEACHER_MIN_TRACK_AGE_SEC: float = 30.0            # track must be old enough before classification
+    TEACHER_POSITION_TOP_FRACTION: float = 0.20
+    TEACHER_POSITION_MIN_TRAVEL_FALLBACK_PX: float = 300.0
 
     # Backward-compatible aliases
     TEACHER_CUMULATIVE_TRAVEL_THRESHOLD: float = TEACHER_MIN_CUMULATIVE_TRAVEL_PX
     TEACHER_SPATIAL_VARIANCE_THRESHOLD: float = TEACHER_MIN_SPATIAL_VARIANCE
 
-    SIMULTANEOUS_SUPPRESSION_FRACTION: float = 0.40
+    SIMULTANEOUS_SUPPRESSION_FRACTION: float = 0.60
     SIMULTANEOUS_SUPPRESSION_MIN_TRACKS: int = 3
-    SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD: float = 0.25
+    SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD: float = 0.50
 
     # Backward-compatible aliases
     SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD: float = SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD
@@ -121,6 +127,8 @@ class Config:
     # ID switch observability (heuristic; without ground truth it is an approximation)
     ID_SWITCH_DISTANCE_PX: float = 60.0
     ID_SWITCH_LOOKBACK_SEC: float = 15.0
+    TRACKER_TRACK_BUFFER: int = 20
+    TRACKER_REID_MAX_DISTANCE_PX: float = 180.0
 
     # Async job-based API storage
     JOB_STORAGE_DIR: str = "job_store"
