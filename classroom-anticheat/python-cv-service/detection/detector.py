@@ -69,7 +69,8 @@ class PersonDetector:
         self.model = YOLO(model_path)
         self.confidence = confidence
         self.nms_iou_threshold = float(getattr(config, "NMS_IOU_THRESHOLD", 0.45))
-        print(f"[Detector] Loaded {model_path} with confidence threshold {confidence}")
+        self.yolo_device = 0 if torch.cuda.is_available() else "cpu"
+        print(f"[Detector] Loaded {model_path} with confidence threshold {confidence} (device={self.yolo_device})")
 
     def _filter_detections(self, detections: List[Detection]) -> List[Detection]:
         filtered: List[Detection] = []
@@ -107,6 +108,7 @@ class PersonDetector:
             verbose=False,
             conf=self.confidence,
             iou=self.nms_iou_threshold,
+            device=self.yolo_device,
         )
         
         detections = []

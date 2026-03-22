@@ -92,13 +92,16 @@ class Config:
 
     # Backward-compatible alias
     EMA_ALPHA: float = EMA_ALPHA_BASE
-    SUSPICION_ENTER_THRESHOLD: float = 0.45
-    SUSPICION_EXIT_THRESHOLD: float = 0.30
+    SUSPICION_ENTER_THRESHOLD: float = 0.28
+    SUSPICION_EXIT_THRESHOLD: float = 0.18
+    INTERVAL_GRACE_FRAMES: int = 8
     MIN_INTERVAL_DURATION_SEC: float = 3.0
     MIN_INTERVAL_AVG_CONFIDENCE: float = 0.33
 
     # Phase 2 runtime weighting/threshold adaptation for real classroom footage
     MIN_CONFIDENCE_WEIGHT_FLOOR: float = 0.35
+    SOFT_GATE_MIN_WEIGHT: float = 0.15
+    SOFT_GATE_FLOOR: float = 0.20
     EFFECTIVE_SCORE_CEILING: float = 0.5
     # NOTE: This value documents the practical maximum observed score in real classroom footage.
     # It is NOT used to scale detection thresholds. Thresholds are defined directly via

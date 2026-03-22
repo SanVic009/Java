@@ -350,6 +350,8 @@ class Phase2Scoring:
             baseline_gaze_long: Deque[Tuple[float, float]] = None
             interval_open: bool = False
             interval: Optional[IntervalAcc] = None
+            grace_frames_remaining: int = 0
+            interval_exit_time: Optional[float] = None
 
         track_states: Dict[int, TrackState] = {}
 
@@ -364,6 +366,8 @@ class Phase2Scoring:
                     baseline_gaze_long=deque(),
                     interval_open=False,
                     interval=None,
+                    grace_frames_remaining=0,
+                    interval_exit_time=None,
                 )
             return track_states[tid]
 
@@ -555,21 +559,22 @@ class Phase2Scoring:
                         head_pose_conf = float(pose.get("head_pose_confidence", 0.0))
                         gaze_reliability = float(pose.get("gaze_reliability", 0.0))
 
-                    frame_usable = (
-                        visibility_score >= float(config.MIN_FRAME_VISIBILITY_SCORE)
-                        and head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
-                    )
+                    raw_conf = min(visibility_score, head_pose_conf)
                     head_signal_reliable = head_pose_conf >= float(config.MIN_POSE_CONFIDENCE)
                     gaze_signal_reliable = gaze_reliability >= float(config.MIN_POSE_CONFIDENCE)
 
-                    if not frame_usable:
+                    if (
+                        visibility_score < float(config.MIN_FRAME_VISIBILITY_SCORE)
+                        or head_pose_conf < float(config.MIN_POSE_CONFIDENCE)
+                    ):
                         stats["frames_low_visibility"] += 1
-                    else:
+
+                    if pose is not None:
                         baseline_calibration_ok = bool(config.BASELINE_UPDATE_DURING_SUSPICION) or (
                             float(timestamp) <= float(effective_baseline_lock_sec)
                             or float(state.ema) < float(ema_baseline_freeze_threshold)
                         )
-                        if baseline_calibration_ok:
+                        if baseline_calibration_ok and raw_conf >= float(config.SOFT_GATE_FLOOR):
                             state.baseline_yaw.append((timestamp, float(pose["yaw"])))
                             state.baseline_gaze.append((timestamp, float(pose["gaze_x"])))
                             state.baseline_yaw_long.append((timestamp, float(pose["yaw"])))
@@ -597,84 +602,84 @@ class Phase2Scoring:
 
                     # 2) Compute signals and confidence-weighted score when possible.
                     if pose is not None and baseline_ready:
-                        if not frame_usable:
-                            quality_gate_status = f"fail:vis={visibility_score:.2f},head={head_pose_conf:.2f}"
+                        quality_gate_status = "ok"
+                        yaw = float(pose["yaw"])
+                        gaze_x = float(pose["gaze_x"])
+
+                        head_dev = abs(yaw - float(baseline_yaw))
+                        gaze_dev = abs(gaze_x - float(baseline_gaze))
+
+                        if head_signal_reliable:
+                            head_signal = _clamp(head_dev / float(config.HEAD_DEV_NORM_DEG), 0.0, 1.0)
                         else:
-                            quality_gate_status = "ok"
-                            yaw = float(pose["yaw"])
-                            gaze_x = float(pose["gaze_x"])
+                            head_signal = 0.0
 
-                            head_dev = abs(yaw - float(baseline_yaw))
-                            gaze_dev = abs(gaze_x - float(baseline_gaze))
+                        if gaze_signal_reliable:
+                            gaze_signal = _clamp(gaze_dev / float(config.GAZE_DEV_NORM), 0.0, 1.0)
+                        else:
+                            gaze_signal = 0.0
 
-                            if head_signal_reliable:
-                                head_signal = _clamp(head_dev / float(config.HEAD_DEV_NORM_DEG), 0.0, 1.0)
-                            else:
-                                head_signal = 0.0
+                        if baseline_dist is not None and nearest_distance is not None and baseline_dist > 0:
+                            threshold = float(baseline_dist) * float(config.PROXIMITY_DISTANCE_RATIO_THRESHOLD)
+                            if threshold > 1e-6 and nearest_distance <= threshold:
+                                proximity_signal = _clamp((threshold - nearest_distance) / threshold, 0.0, 1.0)
 
-                            if gaze_signal_reliable:
-                                gaze_signal = _clamp(gaze_dev / float(config.GAZE_DEV_NORM), 0.0, 1.0)
-                            else:
-                                gaze_signal = 0.0
-
-                            if baseline_dist is not None and nearest_distance is not None and baseline_dist > 0:
-                                threshold = float(baseline_dist) * float(config.PROXIMITY_DISTANCE_RATIO_THRESHOLD)
-                                if threshold > 1e-6 and nearest_distance <= threshold:
-                                    proximity_signal = _clamp((threshold - nearest_distance) / threshold, 0.0, 1.0)
-
-                            if baseline_yaw is not None and baseline_yaw_long is not None:
-                                drift_signal = _clamp(
-                                    abs(float(baseline_yaw) - float(baseline_yaw_long))
-                                    / float(config.HEAD_DEV_NORM_DEG),
-                                    0.0,
-                                    1.0,
-                                )
-
-                            raw_signal_score = (
-                                self.weight_head * head_signal
-                                + self.weight_gaze * gaze_signal
-                                + self.weight_proximity * proximity_signal
-                                + self.weight_drift * drift_signal
-                            )
-                            raw_signal_score = _clamp(raw_signal_score, 0.0, 1.0)
-
-                            estimation_mode = rec.get("estimation_mode")
-                            if estimation_mode == "bbox_proxy_face_not_visible":
-                                raw_signal_score = _clamp(raw_signal_score * 0.5, 0.0, 1.0)
-                            elif estimation_mode == "body_pose_landmarks":
-                                pass
-                            elif estimation_mode == "profile_face_detected":
-                                pass
-
-                            occlusion_clarity = float(1.0 - occlusion_score)
-                            confidence_weight_mean = (
-                                0.4 * pose_conf
-                                + 0.3 * visibility_score
-                                + 0.2 * tracking_stability_score
-                                + 0.1 * occlusion_clarity
-                            )
-                            confidence_weight = _clamp(
-                                max(float(confidence_weight_mean), float(config.MIN_CONFIDENCE_WEIGHT_FLOOR)),
+                        if baseline_yaw is not None and baseline_yaw_long is not None:
+                            drift_signal = _clamp(
+                                abs(float(baseline_yaw) - float(baseline_yaw_long))
+                                / float(config.HEAD_DEV_NORM_DEG),
                                 0.0,
                                 1.0,
                             )
 
-                            active_signals = sum(
-                                [
-                                    1 if head_signal >= 0.5 else 0,
-                                    1 if gaze_signal >= 0.5 else 0,
-                                    1 if proximity_signal >= 0.5 else 0,
-                                ]
-                            )
-                            if active_signals >= 2:
-                                confidence_weight = _clamp(confidence_weight * 1.15, 0.0, 1.0)
+                        # When estimation mode is body_pose_landmarks, gaze is structurally
+                        # unavailable (no iris data), not just unreliable. Redistribute its
+                        # weight to head so the scoring budget is fully used.
+                        estimation_mode = rec.get("estimation_mode", "")
+                        if estimation_mode == "body_pose_landmarks":
+                            effective_head_weight = self.weight_head + self.weight_gaze
+                            effective_gaze_weight = 0.0
+                        else:
+                            effective_head_weight = self.weight_head
+                            effective_gaze_weight = self.weight_gaze
 
-                            final_score_pre = raw_signal_score * confidence_weight
+                        raw_signal_score = (
+                            effective_head_weight * head_signal
+                            + effective_gaze_weight * gaze_signal
+                            + self.weight_proximity * proximity_signal
+                            + self.weight_drift * drift_signal
+                        )
+                        raw_signal_score = _clamp(raw_signal_score, 0.0, 1.0)
 
-                            head_dev_flag = 1 if head_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
-                            gaze_dev_flag = 1 if gaze_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
+                        if estimation_mode == "bbox_proxy_face_not_visible":
+                            raw_signal_score = _clamp(raw_signal_score * 0.5, 0.0, 1.0)
+                        elif estimation_mode == "body_pose_landmarks":
+                            pass
+                        elif estimation_mode == "profile_face_detected":
+                            pass
+
+                        # Soft gate: compute raw_conf as the bottleneck of visibility and pose confidence
+                        raw_conf = min(visibility_score, head_pose_conf)
+
+                        # Map raw_conf continuously onto a weight in [SOFT_GATE_MIN_WEIGHT, 1.0]
+                        # Below SOFT_GATE_FLOOR: clamp to SOFT_GATE_MIN_WEIGHT (frame still contributes, weakly)
+                        # Above SOFT_GATE_FLOOR: linear interpolation up to 1.0
+                        if raw_conf <= float(config.SOFT_GATE_FLOOR):
+                            confidence_weight = float(config.SOFT_GATE_MIN_WEIGHT)
+                        else:
+                            t = (raw_conf - float(config.SOFT_GATE_FLOOR)) / (1.0 - float(config.SOFT_GATE_FLOOR))
+                            confidence_weight = float(config.SOFT_GATE_MIN_WEIGHT) + t * (1.0 - float(config.SOFT_GATE_MIN_WEIGHT))
+
+                        # Apply existing floor as absolute minimum
+                        confidence_weight = max(float(confidence_weight), float(config.MIN_CONFIDENCE_WEIGHT_FLOOR))
+                        confidence_weight = _clamp(confidence_weight, 0.0, 1.0)
+
+                        final_score_pre = raw_signal_score * confidence_weight
+
+                        head_dev_flag = 1 if head_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
+                        gaze_dev_flag = 1 if gaze_signal >= float(config.SIGNAL_FLAG_THRESHOLD) else 0
                     else:
-                        if not frame_usable:
+                        if pose is None:
                             quality_gate_status = f"fail:vis={visibility_score:.2f},head={head_pose_conf:.2f}"
                         elif not baseline_ready:
                             quality_gate_status = "fail:baseline_not_ready"
@@ -817,12 +822,29 @@ class Phase2Scoring:
                                         interval.proximity_distance_min = min(float(interval.proximity_distance_min), float(item["nearest_distance"]))
 
                         if state.ema <= adjusted_exit_th:
-                            _finalize_interval(tid, interval)
-                            state.interval_open = False
-                            state.interval = None
+                            if state.grace_frames_remaining <= 0:
+                                # First frame below exit threshold — start grace period
+                                state.grace_frames_remaining = int(config.INTERVAL_GRACE_FRAMES)
+                                state.interval_exit_time = float(item["timestamp"])
+                            else:
+                                # Still in grace period — count down
+                                state.grace_frames_remaining -= 1
+                                if state.grace_frames_remaining <= 0:
+                                    # Grace period exhausted — close interval at the time EMA first dropped
+                                    interval.end_time = float(state.interval_exit_time)
+                                    _finalize_interval(tid, interval)
+                                    state.interval_open = False
+                                    state.interval = None
+                                    state.interval_exit_time = None
+                        else:
+                            # EMA recovered within grace period — cancel grace, interval continues
+                            state.grace_frames_remaining = 0
+                            state.interval_exit_time = None
 
                     if not state.interval_open and state.ema >= adjusted_enter_th:
                         state.interval_open = True
+                        state.grace_frames_remaining = 0
+                        state.interval_exit_time = None
                         state.interval = IntervalAcc(start_time=float(item["timestamp"]), end_time=float(item["timestamp"]))
                         interval = state.interval
                         if include_for_interval:
@@ -851,6 +873,8 @@ class Phase2Scoring:
         # Finalize any open intervals at EOF.
         for tid, state in track_states.items():
             if state.interval_open and state.interval is not None:
+                if state.interval_exit_time is not None:
+                    state.interval.end_time = float(state.interval_exit_time)
                 _finalize_interval(tid, state.interval)
 
         # Merge intervals by gap per track.

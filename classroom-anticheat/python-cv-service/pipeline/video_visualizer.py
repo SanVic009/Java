@@ -32,6 +32,8 @@ class FrameAnn:
     head_pose_confidence: float
     yaw: float
     pitch: float
+    estimation_mode: str
+    pose: Dict[str, Any]
 
 
 class VideoVisualizer:
@@ -133,7 +135,7 @@ class VideoVisualizer:
 
         # ---- Build sample bbox lookup from phase1_features.jsonl ----
         sample_bbox: DefaultDict[int, Dict[int, List[int]]] = defaultdict(dict)
-        sample_pose: DefaultDict[int, Dict[int, Dict[str, float]]] = defaultdict(dict)
+        sample_pose: DefaultDict[int, Dict[int, Dict[str, Any]]] = defaultdict(dict)
         with phase1_features_path.open("r", encoding="utf-8") as f:
             for line in f:
                 if not line.strip():
@@ -151,6 +153,8 @@ class VideoVisualizer:
                     "head_pose_confidence": float(pose.get("head_pose_confidence", 0.0)),
                     "yaw": float(pose.get("yaw", 0.0)),
                     "pitch": float(pose.get("pitch", 0.0)),
+                    "pose_keypoints_2d": pose.get("pose_keypoints_2d", []) or [],
+                    "estimation_mode": str(rec.get("estimation_mode") or pose.get("estimation_mode") or ""),
                 }
 
         # Now that we have all tracks from Phase 1, update the timeline/annotation universe.
@@ -213,6 +217,11 @@ class VideoVisualizer:
                         head_pose_confidence=float(pose.get("head_pose_confidence", 0.0)),
                         yaw=float(pose.get("yaw", 0.0)),
                         pitch=float(pose.get("pitch", 0.0)),
+                        estimation_mode=str(pose.get("estimation_mode", "")),
+                        pose={
+                            "yaw": float(pose.get("yaw", 0.0)),
+                            "pose_keypoints_2d": pose.get("pose_keypoints_2d", []) or [],
+                        },
                     )
                     key = (tid, f)
                     ann_lookup[key] = ann
@@ -263,6 +272,49 @@ class VideoVisualizer:
             thickness = int(cfg.ANNOT_LINE_THICKNESS)
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
+            # Draw all pose anchor points from the phase1 feature record
+            pose = ann.pose
+            if pose is not None:
+                estimation_mode = ann.estimation_mode or ""
+                keypoints = pose.get("pose_keypoints_2d", [])
+
+                # Color per estimation mode so we can instantly see which path fired
+                if estimation_mode == "mediapipe_face_crop":
+                    kp_color = (0, 255, 0)        # green
+                elif estimation_mode == "profile_face_detected":
+                    kp_color = (255, 165, 0)      # orange
+                elif estimation_mode == "body_pose_landmarks":
+                    kp_color = (255, 0, 255)      # magenta
+                elif estimation_mode == "coarse_face_fallback":
+                    kp_color = (0, 255, 255)      # cyan
+                else:
+                    kp_color = (128, 128, 128)    # gray = bbox_proxy
+
+                frame_h, frame_w = frame.shape[:2]
+
+                # Draw each keypoint as a filled circle
+                for kp in keypoints:
+                    if len(kp) >= 2:
+                        if estimation_mode == "body_pose_landmarks":
+                            kx = int(kp[0])
+                            ky = int(kp[1])
+                        else:
+                            kx = int(kp[0]) + x1  # keypoints are in crop-local coords, shift to frame
+                            ky = int(kp[1]) + y1
+                        if 0 <= kx < frame_w and 0 <= ky < frame_h:
+                            cv2.circle(frame, (kx, ky), 5, kp_color, -1)
+                            cv2.circle(frame, (kx, ky), 6, (0, 0, 0), 1)  # black outline
+
+                # Draw estimation mode label at top of bbox
+                label = estimation_mode.replace("_face_", " ").replace("_", " ")[:18]
+                cv2.putText(frame, label, (x1, y1 - 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.35, kp_color, 1, cv2.LINE_AA)
+
+                # Draw yaw value explicitly so we can see what the system computed
+                yaw_val = float(pose.get("yaw", 0.0))
+                cv2.putText(frame, f"yaw:{yaw_val:.0f}", (x1, y2 + 14),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (255, 255, 0), 1, cv2.LINE_AA)
+
             # Track label above bbox.
             label = f"ID {tid}"
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, float(cfg.ANNOT_FONT_SCALE), 1)
@@ -292,6 +344,19 @@ class VideoVisualizer:
             cursor_x = max(0, min(width - 1, cursor_x))
             cv2.line(frame, (cursor_x, timeline_y0), (cursor_x, timeline_y0 + timeline_h - 1), (255, 255, 255), 1)
 
+        def _draw_estimation_legend(frame: np.ndarray):
+            legend_items = [
+                ("mediapipe face",  (0, 255, 0)),
+                ("profile",         (255, 165, 0)),
+                ("body pose",       (255, 0, 255)),
+                ("coarse face",     (0, 255, 255)),
+                ("bbox proxy",      (128, 128, 128)),
+            ]
+            for i, (label, color) in enumerate(legend_items):
+                cv2.rectangle(frame, (8, 8 + i * 18), (16, 16 + i * 18), color, -1)
+                cv2.putText(frame, label, (20, 16 + i * 18),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1, cv2.LINE_AA)
+
         # ---- Draw per frame ----
         frame_idx = 0
         while frame_idx < total_frames:
@@ -302,6 +367,7 @@ class VideoVisualizer:
             ts = float(frame_idx) / fps if fps > 0 else 0.0
             cursor_x = int((ts / duration_sec) * width) if duration_sec > 1e-6 else 0
             _draw_timeline_strip(frame, cursor_x)
+            _draw_estimation_legend(frame)
 
             # Draw annotations for this frame.
             for tid, ann in ann_by_frame.get(frame_idx, []):

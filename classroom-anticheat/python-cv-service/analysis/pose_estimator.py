@@ -6,11 +6,24 @@ from __future__ import annotations
 import mediapipe as mp
 import numpy as np
 import cv2
+import torch
 from pathlib import Path
 from typing import Optional, Tuple, Dict, List, Any
 from dataclasses import dataclass
 
 from config import config
+
+
+def _resolve_model_path(model_name: str) -> str:
+    candidates = [
+        Path(__file__).resolve().parents[1] / model_name,
+        Path(__file__).resolve().parents[1] / "models" / model_name,
+        Path.cwd() / model_name,
+    ]
+    for p in candidates:
+        if p.exists() and p.is_file():
+            return str(p)
+    return model_name
 
 
 @dataclass
@@ -76,13 +89,19 @@ class PoseEstimator:
             min_detection_confidence=min_detection_confidence,
             min_tracking_confidence=min_detection_confidence
         )
-        self.mp_pose = mp.solutions.pose
-        self.body_pose = self.mp_pose.Pose(
-            static_image_mode=True,
-            model_complexity=0,
-            enable_segmentation=False,
-            min_detection_confidence=0.4,
-        )
+        # YOLOv8-pose: multi-person keypoint detection in one call
+        # Replaces MediaPipe Pose which only returns one skeleton per image
+        from ultralytics import YOLO as _YOLO
+        try:
+            from ultralytics.nn.tasks import PoseModel
+            if hasattr(np, "__version__") and hasattr(__import__("torch").serialization, "add_safe_globals"):
+                __import__("torch").serialization.add_safe_globals([PoseModel])
+        except Exception:
+            pass
+        _pose_model_path = _resolve_model_path("yolov8m-pose.pt")
+        self.yolo_pose = _YOLO(_pose_model_path)
+        self.yolo_device = 0 if torch.cuda.is_available() else "cpu"
+        print(f"[PoseEstimator] YOLOv8-pose loaded for body landmark estimation (device={self.yolo_device})")
 
         self.min_face_crop_px = int(getattr(config, "MIN_FACE_CROP_PX", 35))
         self._face_detector, self._face_detector_name = self._init_face_detector()
@@ -104,13 +123,14 @@ class PoseEstimator:
         ], dtype=np.float64)
         
         print(f"[PoseEstimator] Initialized (detector={self._face_detector_name}, min_face_crop_px={self.min_face_crop_px})")
-        print("[PoseEstimator] Body pose estimator initialized (model_complexity=0)")
+        print("[PoseEstimator] Body pose estimator initialized (YOLOv8-pose)")
     
     def estimate(
         self, 
         frame: np.ndarray, 
         bbox: Tuple[int, int, int, int],
         detection_confidence: float = 0.0,
+        pose_result_cache=None,
     ) -> Optional[PoseEstimate]:
         """
         Estimate head pose and gaze for a person in the frame.
@@ -222,10 +242,10 @@ class PoseEstimator:
             )
 
         # No face found.
-        # Try body-landmark head direction first (works for seated/downward head poses).
+        # Try MediaPipe Pose body landmarks first — works for seated students looking down.
         if float(detection_confidence) >= float(getattr(config, "MIN_TRACK_CONFIDENCE", 0.35)):
             body_est = self._estimate_from_body_landmarks(
-                frame=frame,
+                pose_result=pose_result_cache,
                 bbox=bbox,
                 bbox_aspect_ratio=bbox_aspect_ratio,
                 bbox_orientation_deg=bbox_orientation_deg,
@@ -233,16 +253,23 @@ class PoseEstimator:
             if body_est is not None:
                 return body_est
 
-            # Body pose also failed — fallback to bbox proxy.
-            return self._coarse_pose_from_bbox(
-                bbox_w=crop_w,
-                bbox_h=crop_h,
-                detect_conf=float(detection_confidence),
-                bbox_aspect_ratio=bbox_aspect_ratio,
-                bbox_orientation_deg=bbox_orientation_deg,
-            )
+        # bbox proxy is unconditional — always fires as last resort.
+        # _coarse_pose_from_bbox only needs crop dimensions, not detection confidence.
+        return self._coarse_pose_from_bbox(
+            bbox_w=crop_w,
+            bbox_h=crop_h,
+            detect_conf=float(detection_confidence),
+            bbox_aspect_ratio=bbox_aspect_ratio,
+            bbox_orientation_deg=bbox_orientation_deg,
+        )
 
-        return None
+    def run_yolo_pose(self, frame: np.ndarray):
+        """Run YOLOv8-pose on the full frame once. Cache and reuse per frame."""
+        try:
+            results = self.yolo_pose(frame, verbose=False, conf=0.3, device=self.yolo_device)
+            return results[0] if results else None
+        except Exception:
+            return None
 
     def _init_face_detector(self):
         """Initialize YuNet when model exists; fallback is handled separately."""
@@ -423,66 +450,92 @@ class PoseEstimator:
 
     def _estimate_from_body_landmarks(
         self,
-        frame: np.ndarray,
+        pose_result,
         bbox: Tuple[int, int, int, int],
         bbox_aspect_ratio: float,
         bbox_orientation_deg: float,
     ) -> Optional[PoseEstimate]:
         """
-        Estimate head direction from MediaPipe Pose body landmarks.
+        Estimate head direction using YOLOv8-pose keypoints.
+
+        YOLOv8-pose detects all people simultaneously and returns per-person
+        keypoints already matched to their bounding box. We find the detected
+        person whose bounding box best overlaps with the target YOLO track bbox.
+
+        COCO keypoint indices used:
+            0  = nose
+            3  = left ear
+            4  = right ear
+            5  = left shoulder
+            6  = right shoulder
         """
+        if pose_result is None:
+            return None
+        result = pose_result
+        if result.keypoints is None or result.keypoints.xy is None:
+            return None
+
+        kp_xy = result.keypoints.xy.cpu().numpy()  # shape: (N, 17, 2)
+        kp_vis = result.keypoints.conf             # shape: (N, 17) or None
+        boxes = result.boxes.xyxy.cpu().numpy()    # shape: (N, 4)
+
+        if kp_xy.shape[0] == 0:
+            return None
+
         x1, y1, x2, y2 = bbox
-        h, w = frame.shape[:2]
 
-        pad = int((y2 - y1) * 0.05)
-        cx1 = max(0, x1 - pad)
-        cy1 = max(0, y1 - pad)
-        cx2 = min(w, x2 + pad)
-        cy2 = min(h, y2 + pad)
+        def _iou(a, b):
+            ix1 = max(a[0], b[0]); iy1 = max(a[1], b[1])
+            ix2 = min(a[2], b[2]); iy2 = min(a[3], b[3])
+            inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+            area_a = (a[2] - a[0]) * (a[3] - a[1])
+            area_b = (b[2] - b[0]) * (b[3] - b[1])
+            union = area_a + area_b - inter
+            return inter / union if union > 0 else 0.0
 
-        crop = frame[cy1:cy2, cx1:cx2]
-        if crop.size == 0:
+        target = [x1, y1, x2, y2]
+        best_idx = -1
+        best_iou = 0.15
+
+        for i, box in enumerate(boxes):
+            iou = _iou(target, box)
+            if iou > best_iou:
+                best_iou = iou
+                best_idx = i
+
+        if best_idx < 0:
             return None
 
-        crop_h, crop_w = crop.shape[:2]
-        if crop_h < 20 or crop_w < 20:
-            return None
-
-        rgb_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        try:
-            results = self.body_pose.process(rgb_crop)
-        except Exception:
-            return None
-
-        if not results.pose_landmarks:
-            return None
-
-        lms = results.pose_landmarks.landmark
+        kps = kp_xy[best_idx]
 
         NOSE = 0
-        LEFT_EAR = 7
-        RIGHT_EAR = 8
-        LEFT_SHOULDER = 11
-        RIGHT_SHOULDER = 12
+        L_EAR = 3
+        R_EAR = 4
+        L_SHLDR = 5
+        R_SHLDR = 6
 
-        nose = lms[NOSE]
-        l_ear = lms[LEFT_EAR]
-        r_ear = lms[RIGHT_EAR]
-        l_shldr = lms[LEFT_SHOULDER]
-        r_shldr = lms[RIGHT_SHOULDER]
+        if kp_vis is not None:
+            vis = kp_vis.cpu().numpy()[best_idx]
+        else:
+            vis = np.ones(17, dtype=np.float32)
 
-        MIN_VIS = 0.4
-        if l_shldr.visibility < MIN_VIS or r_shldr.visibility < MIN_VIS:
+        MIN_VIS = 0.3
+        if vis[L_SHLDR] < MIN_VIS or vis[R_SHLDR] < MIN_VIS:
             return None
-        if nose.visibility < MIN_VIS:
+        if vis[NOSE] < MIN_VIS:
             return None
 
-        nose_x = nose.x * crop_w
-        nose_y = nose.y * crop_h
-        l_shldr_x = l_shldr.x * crop_w
-        l_shldr_y = l_shldr.y * crop_h
-        r_shldr_x = r_shldr.x * crop_w
-        r_shldr_y = r_shldr.y * crop_h
+        if kps[NOSE][0] == 0 and kps[NOSE][1] == 0:
+            return None
+        if kps[L_SHLDR][0] == 0 or kps[R_SHLDR][0] == 0:
+            return None
+
+        nose_x = float(kps[NOSE][0])
+        nose_y = float(kps[NOSE][1])
+        l_shldr_x = float(kps[L_SHLDR][0])
+        l_shldr_y = float(kps[L_SHLDR][1])
+        r_shldr_x = float(kps[R_SHLDR][0])
+        r_shldr_y = float(kps[R_SHLDR][1])
 
         shldr_mid_x = (l_shldr_x + r_shldr_x) / 2.0
         shldr_mid_y = (l_shldr_y + r_shldr_y) / 2.0
@@ -505,10 +558,10 @@ class PoseEstimator:
         shldr_angle_rad = np.arctan2(r_shldr_y - l_shldr_y, r_shldr_x - l_shldr_x)
         roll = float(np.degrees(shldr_angle_rad))
 
-        l_ear_vis = float(l_ear.visibility)
-        r_ear_vis = float(r_ear.visibility)
-        nose_vis = float(nose.visibility)
-        shldr_vis = float((l_shldr.visibility + r_shldr.visibility) / 2.0)
+        l_ear_vis = float(vis[L_EAR])
+        r_ear_vis = float(vis[R_EAR])
+        nose_vis = float(vis[NOSE])
+        shldr_vis = float((vis[L_SHLDR] + vis[R_SHLDR]) / 2.0)
 
         max_ear_vis = max(l_ear_vis, r_ear_vis)
         head_pose_confidence = float(np.clip(
@@ -544,9 +597,9 @@ class PoseEstimator:
             gaze_reliability=gaze_reliability,
             confidence=confidence,
             pose_keypoints_2d=[
-                [float(nose_x), float(nose_y)],
-                [float(l_shldr_x), float(l_shldr_y)],
-                [float(r_shldr_x), float(r_shldr_y)],
+                [nose_x, nose_y],
+                [l_shldr_x, l_shldr_y],
+                [r_shldr_x, r_shldr_y],
             ],
             face_visible=False,
             estimation_mode="body_pose_landmarks",
@@ -915,4 +968,3 @@ class PoseEstimator:
     def close(self):
         """Release resources."""
         self.face_mesh.close()
-        self.body_pose.close()

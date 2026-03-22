@@ -158,11 +158,9 @@ class VideoProcessor:
         else:
             payload["observability"] = observability
 
-        # Phase 3: optional annotated video rendering (background).
+        # Phase 3: annotated video rendering is mandatory.
         # Must be additive and must not re-run any CV models.
-        render_enabled = bool(getattr(self.request, "render_annotated_video", False)) or bool(
-            getattr(config, "RENDER_ANNOTATED_VIDEO_DEFAULT", False)
-        )
+        render_enabled = True
         VideoProcessor._update_job_status_details(
             status_path,
             phase1_complete=phase1_complete,

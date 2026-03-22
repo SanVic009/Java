@@ -213,6 +213,9 @@ class FeatureExtractorPhase1:
                             global_motion=(gmc_dx, gmc_dy),
                         )
 
+                        # Run YOLOv8-pose once per frame, cache result for all tracks
+                        pose_result_cache = self.pose_estimator.run_yolo_pose(frame)
+
                         visible_tracks = [t for t in tracks if t.time_since_update == 0]
 
                         # Precompute visible bboxes list for occlusion and proximity.
@@ -253,6 +256,7 @@ class FeatureExtractorPhase1:
                                     frame,
                                     track.bbox,
                                     detection_confidence=det_conf,
+                                    pose_result_cache=pose_result_cache,
                                 )
                                 if pose is not None:
                                     stats["pose_frames_succeeded"] += 1
