@@ -1,0 +1,82 @@
+[STATUS] Checking Python CV service availability...
+[STATUS] Service is available. Submitting analysis job...
+Submitting analysis job to Python CV service...
+Exam ID: exam_009
+Video: 7092083-hd_1920_1080_30fps.mp4
+Payload: {
+  "exam_id": "exam_009",
+  "video_path": "7092083-hd_1920_1080_30fps.mp4",
+  "fps_sampling": 5,
+  "render_annotated_video": true
+}
+[STATUS] Job submitted: b036efb66e594e7093345d8a812caa59
+[Poll 10/2400] Status: running — Starting pipeline (5%)
+[Poll 20/2400] Status: running — Starting pipeline (5%)
+
+============================================================
+        CLASSROOM ANTI-CHEAT ANALYSIS REPORT
+============================================================
+Exam ID: exam_009
+------------------------------------------------------------
+
+Track 3 (stability: 0.77)
+  [00:00:02 – 00:00:03] Suspicion signal (Peak: 0.30, Avg: 0.02, Conf: 0.48)
+    Dominant signals: HeadDeviation
+    Supporting stats: head_dev=8.33%, gaze_dev=0.00%
+
+Track 5 (stability: 0.98)
+  [00:00:02 – 00:00:07] Suspicion signal (Peak: 0.70, Avg: 0.36, Conf: 0.74)
+    Dominant signals: HeadDeviation, SustainedDrift, GazeDeviation
+    Supporting stats: head_dev=70.97%, gaze_dev=22.58%
+
+------------------------------------------------------------
+SUMMARY
+------------------------------------------------------------
+Total tracks analyzed: 5
+Tracks flagged: 2
+Total suspicious intervals: 2
+============================================================
+
+Annotated video:
+  status: rendering
+  path: /home/sanvict/Documents/Code/Java/job_store/b036efb66e594e7093345d8a812caa59/phase2_annotated.mp4
+[Notification] Failed to send batched alert: IOException while sending message
+jakarta.mail.MessagingException: IOException while sending message;
+  nested exception is:
+	java.net.SocketException: Connection timed out
+	at org.eclipse.angus.mail.smtp.SMTPTransport.sendMessage(SMTPTransport.java:1355)
+	at jakarta.mail.Transport.send0(Transport.java:233)
+	at jakarta.mail.Transport.send(Transport.java:102)
+	at com.anticheat.service.NotificationService.sendBatchViolationEmail(NotificationService.java:196)
+	at com.anticheat.service.NotificationService.sendImmediateAlerts(NotificationService.java:87)
+	at com.anticheat.Main.runAnalysis(Main.java:80)
+	at com.anticheat.Main.main(Main.java:46)
+Caused by: java.net.SocketException: Connection timed out
+	at java.base/sun.nio.ch.SocketDispatcher.write0(Native Method)
+	at java.base/sun.nio.ch.SocketDispatcher.write(SocketDispatcher.java:62)
+	at java.base/sun.nio.ch.NioSocketImpl.tryWrite(NioSocketImpl.java:394)
+	at java.base/sun.nio.ch.NioSocketImpl.implWrite(NioSocketImpl.java:410)
+	at java.base/sun.nio.ch.NioSocketImpl.write(NioSocketImpl.java:440)
+	at java.base/sun.nio.ch.NioSocketImpl$2.write(NioSocketImpl.java:819)
+	at java.base/java.net.Socket$SocketOutputStream.write(Socket.java:1195)
+	at java.base/sun.security.ssl.SSLSocketOutputRecord.deliver(SSLSocketOutputRecord.java:345)
+	at java.base/sun.security.ssl.SSLSocketImpl$AppOutputStream.write(SSLSocketImpl.java:1304)
+	at org.eclipse.angus.mail.util.TraceOutputStream.write(TraceOutputStream.java:120)
+	at java.base/java.io.BufferedOutputStream.flushBuffer(BufferedOutputStream.java:125)
+	at java.base/java.io.BufferedOutputStream.implWrite(BufferedOutputStream.java:222)
+	at java.base/java.io.BufferedOutputStream.write(BufferedOutputStream.java:200)
+	at org.eclipse.angus.mail.util.CRLFOutputStream.write(CRLFOutputStream.java:65)
+	at org.eclipse.angus.mail.smtp.SMTPOutputStream.write(SMTPOutputStream.java:67)
+	at org.eclipse.angus.mail.util.CRLFOutputStream.write(CRLFOutputStream.java:55)
+	at org.eclipse.angus.mail.util.BASE64EncoderStream.write(BASE64EncoderStream.java:119)
+	at jakarta.activation.DataHandler.writeTo(DataHandler.java:283)
+	at jakarta.mail.internet.MimeBodyPart.writeTo(MimeBodyPart.java:1683)
+	at jakarta.mail.internet.MimeBodyPart.writeTo(MimeBodyPart.java:980)
+	at jakarta.mail.internet.MimeMultipart.writeTo(MimeMultipart.java:547)
+	at org.eclipse.angus.mail.handlers.multipart_mixed.writeTo(multipart_mixed.java:75)
+	at jakarta.activation.ObjectDataContentHandler.writeTo(DataHandler.java:864)
+	at jakarta.activation.DataHandler.writeTo(DataHandler.java:291)
+	at jakarta.mail.internet.MimeBodyPart.writeTo(MimeBodyPart.java:1683)
+	at jakarta.mail.internet.MimeMessage.writeTo(MimeMessage.java:1911)
+	at org.eclipse.angus.mail.smtp.SMTPTransport.sendMessage(SMTPTransport.java:1305)
+	... 6 more

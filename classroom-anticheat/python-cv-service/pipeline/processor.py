@@ -211,8 +211,8 @@ class VideoProcessor:
                     results_path.write_text(json.dumps(payload_err, indent=2), encoding="utf-8")
                     VideoProcessor._update_job_status_details(status_path, annotated_video_status="failed")
 
-            import threading
-            threading.Thread(target=_render_bg, daemon=True).start()
+            # Call synchronously to ensure annotated video is ready before snapshots
+            _render_bg()
 
         return payload
 

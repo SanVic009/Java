@@ -2,6 +2,7 @@
 Configuration settings for the CV service.
 """
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass
@@ -157,6 +158,10 @@ class Config:
 
 
 config = Config()
+
+# Store jobs at workspace root: /.../Java/job_store
+# config.py lives in /.../Java/classroom-anticheat/python-cv-service/
+config.JOB_STORAGE_DIR = str((Path(__file__).resolve().parents[2] / "job_store"))
 
 # Allowed request video paths (relative to project root).
 if config.ALLOWED_VIDEO_BASE_DIRS is None:

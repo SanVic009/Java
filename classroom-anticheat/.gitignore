@@ -11,3 +11,6 @@ __pycache__/
 target/
 node_modules/
 dist/
+
+# Env file
+.env

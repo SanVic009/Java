@@ -2,8 +2,10 @@ package com.anticheat;
 
 import com.anticheat.model.AnalysisResponse;
 import com.anticheat.model.ExamRequest;
+import com.anticheat.model.NotificationConfig;
 import com.anticheat.report.TerminalReporter;
 import com.anticheat.service.AnalysisClient;
+import com.anticheat.service.NotificationService;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
@@ -63,6 +65,20 @@ public class Main {
             reporter.printStatus("Job submitted: " + jobId);
             AnalysisResponse response = client.waitForResult(jobId);
             reporter.printReport(response);
+
+            try {
+                NotificationConfig notifConfig = NotificationConfig.load();
+                if (notifConfig.enabled) {
+                    NotificationService notifier = new NotificationService(notifConfig, "http://localhost:8000");
+                    if ("immediate".equalsIgnoreCase(notifConfig.deliveryMode)) {
+                        notifier.sendImmediateAlerts(jobId, request.getExamId(), response);
+                    } else {
+                        reporter.printStatus("Notification delivery_mode=digest; deferred to scheduled digest job.");
+                    }
+                }
+            } catch (Exception notificationError) {
+                reporter.printStatus("Notification skipped due to error: " + notificationError.getMessage());
+            }
         } catch (AnalysisClient.AnalysisException e) {
             reporter.printError("Analysis failed: " + e.getMessage());
             System.exit(1);

@@ -1,0 +1,8 @@
+[STATUS] Checking Python CV service availability...
+
+============================================================
+ERROR: Python CV service is not available at localhost:8000
+============================================================
+
+[STATUS] Please start the Python service first:
+  cd python-cv-service && python main.py

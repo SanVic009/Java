@@ -1,0 +1,13 @@
+[STATUS] Checking Python CV service availability...
+[STATUS] Service is available. Submitting analysis job...
+Submitting analysis job to Python CV service...
+Exam ID: exam_001
+Video: Student_Cheating_During_Exam.mp4
+Payload: {
+  "exam_id": "exam_001",
+  "video_path": "Student_Cheating_During_Exam.mp4",
+  "fps_sampling": 5,
+  "render_annotated_video": false
+}
+[STATUS] Job submitted: 63bb34928bdc45fe95b432f7e1da6296
+[Poll 10/2400] Status: running — Starting pipeline (5%)

@@ -1,0 +1,17 @@
+[STATUS] Checking Python CV service availability...
+[STATUS] Service is available. Submitting analysis job...
+Submitting analysis job to Python CV service...
+Exam ID: exam_006
+Video: videos/7092083-hd_1920_1080_30fps.mp4
+Payload: {
+  "exam_id": "exam_006",
+  "video_path": "videos/7092083-hd_1920_1080_30fps.mp4",
+  "fps_sampling": 5,
+  "render_annotated_video": true
+}
+[STATUS] Job submitted: f2659e4286434789a141e556bc59660d
+
+============================================================
+ERROR: Analysis failed: Job f2659e4286434789a141e556bc59660d failed in unknown: Video file 'videos/7092083-hd_1920_1080_30fps.mp4' not found in any allowed directory: ['videos/', 'java-orchestrator/videos/']. Ensure the file exists and path has no traversal. (phase1_artifacts_available=false)
+============================================================
+

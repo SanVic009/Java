@@ -128,7 +128,7 @@ public class AnalysisClient {
         );
     }
 
-    private AnalysisResponse getResult(String jobId) throws AnalysisException {
+    public AnalysisResponse getResult(String jobId) throws AnalysisException {
         try {
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + RESULT_ENDPOINT_PREFIX + jobId))
@@ -162,7 +162,7 @@ public class AnalysisClient {
         }
     }
 
-    private JobStatus getJobStatus(String jobId) throws AnalysisException {
+    public JobStatus getJobStatus(String jobId) throws AnalysisException {
         try {
             HttpRequest httpRequest = HttpRequest.newBuilder()
                     .uri(URI.create(baseUrl + STATUS_ENDPOINT_PREFIX + jobId))
@@ -224,11 +224,11 @@ public class AnalysisClient {
         return "Job " + jobId + " failed.";
     }
 
-    private static class JobStatus {
-        String jobId;
-        String status;
-        double progress;
-        String message;
+    public static class JobStatus {
+        public String jobId;
+        public String status;
+        public double progress;
+        public String message;
     }
 
     /**

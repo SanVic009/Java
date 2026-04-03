@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Analysis</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Video Analysis</h1>
+            <p>Upload a classroom video for offline anti-cheat analysis.</p>
+        </header>
+
+        <div class="card" id="upload-card">
+            <form id="upload-form">
+                <div class="form-group">
+                    <label for="video-file">Video File (MP4)</label>
+                    <input type="file" id="video-file" name="video" accept="video/mp4,video/*" required>
+                </div>
+                <button type="submit" id="submit-btn">Analyze Video</button>
+            </form>
+        </div>
+
+        <div class="card hidden" id="progress-card">
+            <h2>Analysis in Progress</h2>
+            <div class="progress-container">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <p id="progress-text" class="status-text">Uploading...</p>
+        </div>
+
+        <div class="card hidden" id="result-card">
+            <h2>Analysis Complete</h2>
+            <p>The annotated video with tracking boxes and behavioral triggers is ready.</p>
+            <div class="video-container">
+                <video id="result-video" controls></video>
+            </div>
+            <button id="reset-btn" class="btn-secondary">Analyze Another Video</button>
+        </div>
+
+        <div class="error-box hidden" id="error-box">
+            <p id="error-text"></p>
+        </div>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>

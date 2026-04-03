@@ -146,6 +146,74 @@ def _update_status(
     _write_json(path, payload)
 
 
+def _extract_violation_snapshots(job_id: str, request_dict: dict) -> list:
+    """
+    For each high-confidence interval in phase2_results.json,
+    extract a short video clip from the source video.
+    Returns list of snapshot metadata dicts.
+    """
+    import subprocess
+
+    results_path = _phase2_results_path(job_id)
+    if not results_path.exists():
+        return []
+
+    results = _read_json(results_path)
+    video_path = request_dict.get("video_path", "")
+    resolved_video_path = (
+        results.get("observability", {})
+        .get("phase1", {})
+        .get("video_path")
+    )
+    if resolved_video_path:
+        video_path = resolved_video_path
+    if not video_path:
+        return []
+
+    snapshots = []
+    snapshot_dir = _job_dir(job_id) / "snapshots"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    for track in results.get("results", []):
+        for interval in track.get("intervals", []):
+            track_id = int(track["track_id"])
+            start = max(0.0, float(interval["start"]) - 1.0)  # 1s padding before
+            duration = float(interval["duration"]) + 2.0  # 1s padding after
+
+            clip_filename = f"track_{track_id}_t{interval['start']:.1f}.mp4"
+            clip_path = snapshot_dir / clip_filename
+
+            # Use ffmpeg to extract clip — no re-encoding for speed
+            cmd = [
+                "ffmpeg", "-y",
+                "-ss", str(start),
+                "-i", video_path,
+                "-t", str(duration),
+                "-c", "copy",
+                str(clip_path),
+            ]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=30, check=True)
+                snapshots.append(
+                    {
+                        "track_id": track_id,
+                        "start": float(interval["start"]),
+                        "end": float(interval["end"]),
+                        "peak_score": float(interval["peak_score"]),
+                        "dominant_signals": interval.get("dominant_signals", []),
+                        "clip_path": str(clip_path),
+                        "clip_filename": clip_filename,
+                    }
+                )
+            except Exception as e:
+                print(f"[Snapshot] Failed to extract clip for track {track_id}: {e}")
+
+    # Persist snapshot metadata alongside job artifacts
+    snapshots_meta_path = _job_dir(job_id) / "snapshots.json"
+    _write_json(snapshots_meta_path, {"snapshots": snapshots})
+    return snapshots
+
+
 def _run_job(job_id: str, request_dict: Dict[str, Any]) -> None:
     acquired = _try_acquire_lock(job_id)
     if not acquired:
@@ -175,7 +243,15 @@ def _run_job(job_id: str, request_dict: Dict[str, Any]) -> None:
 
         # Post-process: ensure result JSON exists where GET /result expects.
         if results_path.exists() and _read_json(_status_path(job_id)).get("status") != "failed":
-            _update_status(job_id, status="completed", progress=1.0, message="Completed")
+            snapshots = _extract_violation_snapshots(job_id, request_dict)
+            extra_fields = {"snapshot_count": len(snapshots)}
+            _update_status(
+                job_id,
+                status="completed",
+                progress=1.0,
+                message="Completed",
+                extra=extra_fields,
+            )
         else:
             _update_status(job_id, status="failed", progress=0.0, message="Results missing after run")
     except Exception as e:

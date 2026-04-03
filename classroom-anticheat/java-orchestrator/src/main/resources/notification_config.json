@@ -1,0 +1,21 @@
+{
+  "enabled": true,
+  "delivery_mode": "immediate",
+  "peak_score_threshold": 0.35,
+  "recipients": [
+    "badpiggy40@gmail.com"
+  ],
+  "smtp": {
+    "host_env": "SMTP_HOST",
+    "port_env": "SMTP_PORT",
+    "username_env": "SMTP_USERNAME",
+    "password_env": "SMTP_PASSWORD",
+    "from_address_env": "SMTP_FROM_ADDRESS",
+    "recipients_env": "ALERT_RECIPIENTS",
+    "use_tls": true
+  },
+  "digest": {
+    "schedule_cron": "0 18 * * *",
+    "max_events_per_digest": 50
+  }
+}

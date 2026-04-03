@@ -1,0 +1,44 @@
+[STATUS] Checking Python CV service availability...
+[STATUS] Service is available. Submitting analysis job...
+Submitting analysis job to Python CV service...
+Exam ID: exam_010
+Video: 7092083-hd_1920_1080_30fps.mp4
+Payload: {
+  "exam_id": "exam_010",
+  "video_path": "7092083-hd_1920_1080_30fps.mp4",
+  "fps_sampling": 5,
+  "render_annotated_video": true
+}
+[STATUS] Job submitted: f5d1679aef984dcaabc93f09b96cbd0d
+[Poll 10/2400] Status: running — Starting pipeline (5%)
+[Poll 20/2400] Status: running — Starting pipeline (5%)
+
+============================================================
+        CLASSROOM ANTI-CHEAT ANALYSIS REPORT
+============================================================
+Exam ID: exam_010
+------------------------------------------------------------
+
+Track 3 (stability: 0.77)
+  [00:00:02 – 00:00:03] Suspicion signal (Peak: 0.30, Avg: 0.02, Conf: 0.48)
+    Dominant signals: HeadDeviation
+    Supporting stats: head_dev=8.33%, gaze_dev=0.00%
+
+Track 5 (stability: 0.98)
+  [00:00:02 – 00:00:07] Suspicion signal (Peak: 0.70, Avg: 0.36, Conf: 0.74)
+    Dominant signals: HeadDeviation, SustainedDrift, GazeDeviation
+    Supporting stats: head_dev=70.97%, gaze_dev=22.58%
+
+------------------------------------------------------------
+SUMMARY
+------------------------------------------------------------
+Total tracks analyzed: 5
+Tracks flagged: 2
+Total suspicious intervals: 2
+============================================================
+
+Annotated video:
+  status: ready
+  path: /home/sanvict/Documents/Code/Java/job_store/f5d1679aef984dcaabc93f09b96cbd0d/phase2_annotated.mp4
+  resolution: {width=1920.0, height=1080.0}
+  frame_rate: 29.97002997002997
