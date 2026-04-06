@@ -1,0 +1,225 @@
+
+============================================================
+CLASSROOM ANTI-CHEAT CV SERVICE
+============================================================
+Starting server on 0.0.0.0:8000
+============================================================
+
+INFO:     Started server process [365979]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:39108 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "POST /analyze HTTP/1.1" 200 OK
+/home/sanvict/miniconda3/envs/vit/lib/python3.11/site-packages/ultralytics/nn/tasks.py:634: UserWarning: Environment variable TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD detected, since the`weights_only` argument was not explicitly passed to `torch.load`, forcing weights_only=False.
+  return torch.load(file, map_location="cpu"), file  # load
+[Phase1PathCheck] job_dir=/home/sanvict/Documents/Code/Java/job_store/f2e169b7c803489188d5beedf872d2ef features_path=/home/sanvict/Documents/Code/Java/job_store/f2e169b7c803489188d5beedf872d2ef/phase1_features.jsonl exists=False track_meta_path=/home/sanvict/Documents/Code/Java/job_store/f2e169b7c803489188d5beedf872d2ef/phase1_track_meta.json exists=False
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1775298488.062408  367534 gl_context_egl.cc:85] Successfully initialized EGL. Major : 1 Minor: 5
+I0000 00:00:1775298488.066929  367570 gl_context.cc:344] GL version: 3.2 (OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.25.10.1), renderer: Mesa Intel(R) UHD Graphics (TGL GT1)
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[Detector] Loaded /home/sanvict/Documents/Code/Java/classroom-anticheat/python-cv-service/yolov8n.pt with confidence threshold 0.5 (device=0)
+[PoseEstimator] YOLOv8-pose loaded for body landmark estimation (device=0)
+[PoseEstimator] Initialized (detector=haar, min_face_crop_px=35)
+[PoseEstimator] Body pose estimator initialized (YOLOv8-pose)
+[Tracker] Initialized ByteTracker with buffer=20
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+
+[Phase1 Summary]
+  frames_read=529, frames_sampled=106, frames_skipped=423
+  detections_per_sample_frame_avg=10.802
+  pose_success_rate=1.000
+  avg_pose_confidence=0.618
+  tracking_id_switch_events=2
+  tracks_persisted=17
+[Phase2] Using scaled parameters for duration=21.16s (ratio=0.1000): effective_min_lifespan=2.12s, effective_baseline_window=3.00s, effective_min_baseline_samples=3, effective_teacher_min_age=5.00s, effective_min_interval_duration=1.06s, effective_baseline_lock=6.00s, fps_sampling=5, actual_sampling_rate=5.000, alpha=0.200, effective_alpha=0.200, raw_enter_th=0.280, raw_exit_th=0.180, adjusted_enter_th=0.280, adjusted_exit_th=0.180
+[Phase2] Teacher candidate (position-based): track_id=9, median_y=427.8, top_thresh=105.2, travel=848.7
+[Phase2] Excluding teacher track: track_id=9, cumulative_travel=848.68, spatial_variance=1651.43
+
+[Phase2 Summary]
+  kept_tracks=13, discarded_tracks=4
+  intervals_created=4
+  intervals_discarded_confidence=7
+  intervals_discarded_duration=0
+  intervals_discarded_empty=0
+  tracking_id_switch_count_total=0
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+[Snapshot] Using ffmpeg binary: /usr/bin/ffmpeg
+INFO:     127.0.0.1:55306 - "GET /status/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:55306 - "GET /result/f2e169b7c803489188d5beedf872d2ef HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "POST /analyze HTTP/1.1" 200 OK
+[Phase1PathCheck] job_dir=/home/sanvict/Documents/Code/Java/job_store/042a29b41dff4a61bbde421e2b4b9db2 features_path=/home/sanvict/Documents/Code/Java/job_store/042a29b41dff4a61bbde421e2b4b9db2/phase1_features.jsonl exists=False track_meta_path=/home/sanvict/Documents/Code/Java/job_store/042a29b41dff4a61bbde421e2b4b9db2/phase1_track_meta.json exists=False
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+I0000 00:00:1775300138.508301  372275 gl_context_egl.cc:85] Successfully initialized EGL. Major : 1 Minor: 5
+I0000 00:00:1775300138.510284  372295 gl_context.cc:344] GL version: 3.2 (OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.25.10.1), renderer: Mesa Intel(R) UHD Graphics (TGL GT1)
+[Detector] Loaded /home/sanvict/Documents/Code/Java/classroom-anticheat/python-cv-service/yolov8n.pt with confidence threshold 0.5 (device=0)
+[PoseEstimator] YOLOv8-pose loaded for body landmark estimation (device=0)
+[PoseEstimator] Initialized (detector=haar, min_face_crop_px=35)
+[PoseEstimator] Body pose estimator initialized (YOLOv8-pose)
+[Tracker] Initialized ByteTracker with buffer=20
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+
+[Phase1 Summary]
+  frames_read=529, frames_sampled=106, frames_skipped=423
+  detections_per_sample_frame_avg=10.802
+  pose_success_rate=1.000
+  avg_pose_confidence=0.618
+  tracking_id_switch_events=2
+  tracks_persisted=17
+[Phase2] Using scaled parameters for duration=21.16s (ratio=0.1000): effective_min_lifespan=2.12s, effective_baseline_window=3.00s, effective_min_baseline_samples=3, effective_teacher_min_age=5.00s, effective_min_interval_duration=1.06s, effective_baseline_lock=6.00s, fps_sampling=5, actual_sampling_rate=5.000, alpha=0.200, effective_alpha=0.200, raw_enter_th=0.280, raw_exit_th=0.180, adjusted_enter_th=0.280, adjusted_exit_th=0.180
+[Phase2] Teacher candidate (position-based): track_id=9, median_y=427.8, top_thresh=105.2, travel=848.7
+[Phase2] Excluding teacher track: track_id=9, cumulative_travel=848.68, spatial_variance=1651.43
+
+[Phase2 Summary]
+  kept_tracks=13, discarded_tracks=4
+  intervals_created=4
+  intervals_discarded_confidence=7
+  intervals_discarded_duration=0
+  intervals_discarded_empty=0
+  tracking_id_switch_count_total=0
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /status/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50776 - "GET /result/042a29b41dff4a61bbde421e2b4b9db2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "POST /analyze HTTP/1.1" 200 OK
+[Phase1PathCheck] job_dir=/home/sanvict/Documents/Code/Java/job_store/ca9ad407a12c44bb822b676329461994 features_path=/home/sanvict/Documents/Code/Java/job_store/ca9ad407a12c44bb822b676329461994/phase1_features.jsonl exists=False track_meta_path=/home/sanvict/Documents/Code/Java/job_store/ca9ad407a12c44bb822b676329461994/phase1_track_meta.json exists=False
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+I0000 00:00:1775300526.439255  377467 gl_context_egl.cc:85] Successfully initialized EGL. Major : 1 Minor: 5
+I0000 00:00:1775300526.440973  377487 gl_context.cc:344] GL version: 3.2 (OpenGL ES 3.2 Mesa 25.2.8-0ubuntu0.25.10.1), renderer: Mesa Intel(R) UHD Graphics (TGL GT1)
+[Detector] Loaded /home/sanvict/Documents/Code/Java/classroom-anticheat/python-cv-service/yolov8n.pt with confidence threshold 0.5 (device=0)
+[PoseEstimator] YOLOv8-pose loaded for body landmark estimation (device=0)
+[PoseEstimator] Initialized (detector=haar, min_face_crop_px=35)
+[PoseEstimator] Body pose estimator initialized (YOLOv8-pose)
+[Tracker] Initialized ByteTracker with buffer=20
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+
+[Phase1 Summary]
+  frames_read=231, frames_sampled=47, frames_skipped=184
+  detections_per_sample_frame_avg=4.511
+  pose_success_rate=1.000
+  avg_pose_confidence=0.612
+  tracking_id_switch_events=0
+  tracks_persisted=5
+[Phase2] Using scaled parameters for duration=7.71s (ratio=0.1000): effective_min_lifespan=1.00s, effective_baseline_window=3.00s, effective_min_baseline_samples=3, effective_teacher_min_age=5.00s, effective_min_interval_duration=0.50s, effective_baseline_lock=6.00s, fps_sampling=5, actual_sampling_rate=5.994, alpha=0.200, effective_alpha=0.200, raw_enter_th=0.280, raw_exit_th=0.180, adjusted_enter_th=0.280, adjusted_exit_th=0.180
+
+[Phase2 Summary]
+  kept_tracks=5, discarded_tracks=0
+  intervals_created=2
+  intervals_discarded_confidence=0
+  intervals_discarded_duration=0
+  intervals_discarded_empty=0
+  tracking_id_switch_count_total=0
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /status/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60188 - "GET /result/ca9ad407a12c44bb822b676329461994 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [365979]

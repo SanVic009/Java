@@ -9,16 +9,7 @@ from pathlib import Path
 class Config:
     # Frame sampling
     FPS_SAMPLING: int = 5
-    
-    # Baseline calibration
-    BASELINE_DURATION_SEC: int = 60
-    
-    # Signal thresholds
-    HEAD_YAW_MIN_THRESHOLD: float = 25.0  # degrees
-    HEAD_YAW_STD_MULTIPLIER: float = 2.0
-    GAZE_THRESHOLD: float = 0.4
-    PROXIMITY_RATIO: float = 0.7
-    
+
     # Signal weights (must sum to 1.0)
     # Rebalanced so head+gaze-only behavior can still exceed suspicion thresholds.
     HEAD_WEIGHT: float = 0.45
@@ -26,24 +17,9 @@ class Config:
     PROXIMITY_WEIGHT: float = 0.17
     DRIFT_WEIGHT: float = 0.10
 
-    # Backward-compatible aliases
-    WEIGHT_HEAD: float = HEAD_WEIGHT
-    WEIGHT_GAZE: float = GAZE_WEIGHT
-    WEIGHT_PROXIMITY: float = PROXIMITY_WEIGHT
-    
-    # Scoring
-    SUSPICIOUS_THRESHOLD: float = 0.75
-    
-    # Temporal aggregation
-    WINDOW_SIZE_SEC: int = 30
-    SUSPICIOUS_FRAME_RATIO: float = 0.20  # 20%
-    
     # Interval merging
     MERGE_GAP_SEC: float = 5.0
-    
-    # Assignment stabilization
-    STABILIZATION_FRAMES: int = 10
-    
+
     # Detection confidence
     YOLO_CONFIDENCE: float = 0.5
     MIN_DETECTION_CONFIDENCE: float = 0.60
@@ -53,8 +29,13 @@ class Config:
     MAX_PERSON_ASPECT_RATIO: float = 4.5
 
     # Pose estimator pre-gate (do not run face landmarks for tiny faces)
-    MIN_FACE_CROP_PX: int = 35
-    
+    MIN_FACE_CROP_PX: int = 24  # lowered from 35: catches more small/distant faces
+
+    # Face detector sensitivity (controls how aggressively we try before falling back)
+    FACE_DETECTOR_SCORE_THRESHOLD: float = 0.45   # YuNet score gate (was hardcoded 0.60)
+    FACE_DETECTOR_HAAR_MIN_NEIGHBORS: int = 3      # Haar strictness (was hardcoded 5)
+    FACE_MESH_MIN_DETECTION_CONFIDENCE: float = 0.35  # MediaPipe FaceMesh gate (was hardcoded 0.50)
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8000
@@ -78,7 +59,6 @@ class Config:
     HEAD_DEV_NORM_DEG: float = 25.0
     GAZE_DEV_NORM: float = 0.4
     SIGNAL_FLAG_THRESHOLD: float = 0.6
-    GAZE_X_SCALE_FACTOR: float = 2.0
     PROXIMITY_DISTANCE_RATIO_THRESHOLD: float = 0.7  # current_dist < baseline_dist * ratio triggers proximity anomaly
     BODY_POSE_YAW_SCALE_DEG: float = 35.0
 
@@ -90,9 +70,6 @@ class Config:
     # Increase alpha (e.g. 0.35) to detect shorter events at the cost of more flicker.
     # Decrease alpha (e.g. 0.1) for smoother, slower-responding detection.
     EMA_ALPHA_FAST: float = 0.35  # used when fps_sampling >= 10 (higher temporal resolution)
-
-    # Backward-compatible alias
-    EMA_ALPHA: float = EMA_ALPHA_BASE
     SUSPICION_ENTER_THRESHOLD: float = 0.28
     SUSPICION_EXIT_THRESHOLD: float = 0.18
     INTERVAL_GRACE_FRAMES: int = 8
@@ -103,10 +80,6 @@ class Config:
     MIN_CONFIDENCE_WEIGHT_FLOOR: float = 0.35
     SOFT_GATE_MIN_WEIGHT: float = 0.15
     SOFT_GATE_FLOOR: float = 0.20
-    EFFECTIVE_SCORE_CEILING: float = 0.5
-    # NOTE: This value documents the practical maximum observed score in real classroom footage.
-    # It is NOT used to scale detection thresholds. Thresholds are defined directly via
-    # SUSPICION_ENTER_THRESHOLD and SUSPICION_EXIT_THRESHOLD.
 
     # Phase 2 teacher/event suppression heuristics
     TEACHER_MIN_CUMULATIVE_TRAVEL_PX: float = 800.0   # must satisfy BOTH conditions
@@ -115,17 +88,9 @@ class Config:
     TEACHER_POSITION_TOP_FRACTION: float = 0.20
     TEACHER_POSITION_MIN_TRAVEL_FALLBACK_PX: float = 300.0
 
-    # Backward-compatible aliases
-    TEACHER_CUMULATIVE_TRAVEL_THRESHOLD: float = TEACHER_MIN_CUMULATIVE_TRAVEL_PX
-    TEACHER_SPATIAL_VARIANCE_THRESHOLD: float = TEACHER_MIN_SPATIAL_VARIANCE
-
     SIMULTANEOUS_SUPPRESSION_FRACTION: float = 0.60
     SIMULTANEOUS_SUPPRESSION_MIN_TRACKS: int = 3
     SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD: float = 0.50
-
-    # Backward-compatible aliases
-    SIMULTANEOUS_EVENT_SIGNAL_THRESHOLD: float = SIMULTANEOUS_SUPPRESSION_SCORE_THRESHOLD
-    SIMULTANEOUS_EVENT_MIN_TRACKS: int = SIMULTANEOUS_SUPPRESSION_MIN_TRACKS
     TEACHER_PROXIMITY_SUPPRESSION_RADIUS: float = 120.0
 
     # ID switch observability (heuristic; without ground truth it is an approximation)
@@ -159,9 +124,9 @@ class Config:
 
 config = Config()
 
-# Store jobs at workspace root: /.../Java/job_store
-# config.py lives in /.../Java/classroom-anticheat/python-cv-service/
-config.JOB_STORAGE_DIR = str((Path(__file__).resolve().parents[2] / "job_store"))
+# Store jobs inside the project root: /.../classroom-anticheat/job_store
+# config.py lives in /.../classroom-anticheat/python-cv-service/
+config.JOB_STORAGE_DIR = str((Path(__file__).resolve().parents[1] / "job_store"))
 
 # Allowed request video paths (relative to project root).
 if config.ALLOWED_VIDEO_BASE_DIRS is None:

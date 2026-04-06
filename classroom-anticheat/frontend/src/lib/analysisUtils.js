@@ -1,4 +1,4 @@
-export const API_BASE_URL = 'http://localhost:8000';
+export const API_BASE_URL = 'http://localhost:7070';
 
 export const EMPTY_RESULT = {
   exam_id: '',
@@ -39,6 +39,16 @@ export function formatPercent(value) {
   return `${Math.round((Number(value) || 0) * 100)}%`;
 }
 
+/**
+ * Build a playable URL for the annotated video.
+ * The Java backend serves annotated videos via GET /api/video/{jobId}.
+ */
+export function resolveVideoUrl(jobId) {
+  if (!jobId) return '';
+  return `${API_BASE_URL}/api/video/${jobId}`;
+}
+
+// Keep the old helper for backward compat but prefer resolveVideoUrl
 export function resolveVideoPath(path) {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;

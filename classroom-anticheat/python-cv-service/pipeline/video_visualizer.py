@@ -36,6 +36,35 @@ class FrameAnn:
     pose: Dict[str, Any]
 
 
+def _resolve_ffmpeg_binary() -> Optional[str]:
+    """
+    Resolve a usable ffmpeg executable, avoiding broken ones.
+    """
+    import os, shutil, subprocess
+    candidates = []
+    env_bin = os.environ.get("FFMPEG_BINARY")
+    if env_bin:
+        candidates.append(env_bin)
+
+    # Standard system paths first
+    candidates.append("/usr/bin/ffmpeg")
+    candidates.append("/usr/local/bin/ffmpeg")
+
+    # Then search in PATH
+    path_bin = shutil.which("ffmpeg")
+    if path_bin:
+        candidates.append(path_bin)
+
+    for candidate in candidates:
+        try:
+            # Check if it actually works
+            subprocess.run([candidate, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=5)
+            return candidate
+        except Exception:
+            continue
+    return None
+
+
 class VideoVisualizer:
     def __init__(self):
         # BGR colors for OpenCV drawing.
@@ -229,10 +258,11 @@ class VideoVisualizer:
 
         # ---- Output video writer ----
         out_video_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_video_path = out_video_path.with_suffix('.temp.mp4')
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(out_video_path), fourcc, fps, (width, height))
+        writer = cv2.VideoWriter(str(temp_video_path), fourcc, fps, (width, height))
         if not writer.isOpened():
-            raise RuntimeError(f"Failed to open video writer: {out_video_path}")
+            raise RuntimeError(f"Failed to open video writer: {temp_video_path}")
 
         # ---- Pre-render timeline background (segments) ----
         timeline_y0 = height - timeline_h
@@ -378,6 +408,32 @@ class VideoVisualizer:
 
         cap.release()
         writer.release()
+
+        # Transcode to H.264 (avc1) / yuv420p for HTML5 `<video>` browser compatibility
+        ffmpeg_bin = _resolve_ffmpeg_binary()
+        if ffmpeg_bin:
+            try:
+                subprocess.run([
+                    ffmpeg_bin, "-y", "-i", str(temp_video_path),
+                    "-vcodec", "libx264",
+                    "-pix_fmt", "yuv420p",
+                    "-profile:v", "main",
+                    "-level", "3.1",
+                    "-crf", "23",
+                    str(out_video_path)
+                ], check=True, capture_output=True)
+                if out_video_path.exists():
+                    temp_video_path.unlink()
+                else:
+                    temp_video_path.rename(out_video_path)
+            except Exception as e:
+                print(f"[VideoVisualizer] Warning: Failed to transcode video to h264 with ffmpeg: {e}")
+                if temp_video_path.exists():
+                    temp_video_path.rename(out_video_path)
+        else:
+            print("[VideoVisualizer] Warning: No working ffmpeg found. Video will remain in OpenCV default format (likely incompatible with browsers).")
+            if temp_video_path.exists():
+                temp_video_path.rename(out_video_path)
 
         return {
             "file_path": str(out_video_path),

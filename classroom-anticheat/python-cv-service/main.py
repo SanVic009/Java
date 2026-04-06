@@ -5,6 +5,9 @@ FastAPI application for video analysis.
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
 import threading
 import time
 import traceback
@@ -98,6 +101,45 @@ def _write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+_FFMPEG_BINARY_CACHE: Optional[str] = None
+
+
+def _resolve_ffmpeg_binary() -> Optional[str]:
+    """
+    Resolve a usable ffmpeg executable, avoiding broken ones.
+    """
+    global _FFMPEG_BINARY_CACHE
+    if _FFMPEG_BINARY_CACHE:
+        return _FFMPEG_BINARY_CACHE
+
+    candidates = []
+    env_bin = os.environ.get("FFMPEG_BINARY")
+    if env_bin:
+        candidates.append(env_bin)
+
+    # Standard system paths first
+    candidates.append("/usr/bin/ffmpeg")
+    candidates.append("/usr/local/bin/ffmpeg")
+
+    # Then search in PATH
+    path_bin = shutil.which("ffmpeg")
+    if path_bin:
+        candidates.append(path_bin)
+
+    for candidate in candidates:
+        try:
+            # Check if it actually works
+            subprocess.run([candidate, "-version"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True, timeout=5)
+            _FFMPEG_BINARY_CACHE = candidate
+            print(f"[Snapshot] Using verified ffmpeg binary: {candidate}")
+            return candidate
+        except Exception:
+            continue
+
+    print("[Snapshot] No usable ffmpeg binary found; snapshot extraction disabled.")
+    return None
+
+
 def _try_acquire_lock(job_id: str) -> bool:
     """
     Best-effort lock to avoid duplicate background runs.
@@ -152,8 +194,6 @@ def _extract_violation_snapshots(job_id: str, request_dict: dict) -> list:
     extract a short video clip from the source video.
     Returns list of snapshot metadata dicts.
     """
-    import subprocess
-
     results_path = _phase2_results_path(job_id)
     if not results_path.exists():
         return []
@@ -170,9 +210,19 @@ def _extract_violation_snapshots(job_id: str, request_dict: dict) -> list:
     if not video_path:
         return []
 
+    annotated_path = _job_dir(job_id) / "phase2_annotated.mp4"
+    if annotated_path.exists():
+        video_path = str(annotated_path)
+
     snapshots = []
     snapshot_dir = _job_dir(job_id) / "snapshots"
     snapshot_dir.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg_bin = _resolve_ffmpeg_binary()
+    if ffmpeg_bin is None:
+        snapshots_meta_path = _job_dir(job_id) / "snapshots.json"
+        _write_json(snapshots_meta_path, {"snapshots": snapshots})
+        return snapshots
 
     for track in results.get("results", []):
         for interval in track.get("intervals", []):
@@ -183,13 +233,16 @@ def _extract_violation_snapshots(job_id: str, request_dict: dict) -> list:
             clip_filename = f"track_{track_id}_t{interval['start']:.1f}.mp4"
             clip_path = snapshot_dir / clip_filename
 
-            # Use ffmpeg to extract clip — no re-encoding for speed
+            # Use ffmpeg to extract clip. Encode to libx264 for browser support.
             cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_bin, "-y",
                 "-ss", str(start),
                 "-i", video_path,
                 "-t", str(duration),
-                "-c", "copy",
+                "-vcodec", "libx264",
+                "-pix_fmt", "yuv420p",
+                "-crf", "28",  # higher crf for smaller snapshots
+                "-preset", "faster",
                 str(clip_path),
             ]
             try:

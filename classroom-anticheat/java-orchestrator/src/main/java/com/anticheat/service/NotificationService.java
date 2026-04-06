@@ -21,6 +21,8 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.stream.Collectors;
 
 public class NotificationService {
@@ -35,12 +37,11 @@ public class NotificationService {
     private final boolean useTls;
 
     public NotificationService(NotificationConfig config, String cvServiceBaseUrl) {
-        this.smtpHost = System.getenv(config.smtp.hostEnv);
-        this.smtpPort = Integer.parseInt(
-                Optional.ofNullable(System.getenv(config.smtp.portEnv)).orElse("587")
-        );
-        this.smtpUser = System.getenv(config.smtp.usernameEnv);
-        this.smtpPass = System.getenv(config.smtp.passwordEnv);
+        this.smtpHost = firstNonBlankEnv(config.smtp.hostEnv, "SMTP_HOST", "MAIL_HOST", "smtp.gmail.com");
+        String portRaw = firstNonBlankEnv(config.smtp.portEnv, "SMTP_PORT", "MAIL_PORT", "587");
+        this.smtpPort = Integer.parseInt(portRaw);
+        this.smtpUser = firstNonBlankEnv(config.smtp.usernameEnv, "SMTP_USERNAME", "SMTP_USER", null);
+        this.smtpPass = firstNonBlankEnv(config.smtp.passwordEnv, "SMTP_PASSWORD", "SMTP_PASS", null);
         this.fromAddress = resolveFromAddress(config);
         this.recipients = resolveRecipients(config);
         this.cvServiceBaseUrl = cvServiceBaseUrl;
@@ -60,8 +61,17 @@ public class NotificationService {
             }
         }
 
+        String fallbackEnv = System.getenv("SMTP_FROM_ADDRESS");
+        if (fallbackEnv != null && !fallbackEnv.isBlank()) {
+            return fallbackEnv.trim();
+        }
+
         if (config.smtp.fromAddress != null && !config.smtp.fromAddress.isBlank()) {
             return config.smtp.fromAddress.trim();
+        }
+
+        if (smtpUser != null && !smtpUser.isBlank()) {
+            return smtpUser.trim();
         }
 
         return null;
@@ -78,7 +88,29 @@ public class NotificationService {
             }
         }
 
+        String rawFallback = System.getenv("ALERT_RECIPIENTS");
+        if (rawFallback != null && !rawFallback.isBlank()) {
+            return Arrays.stream(rawFallback.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isBlank())
+                    .collect(Collectors.toList());
+        }
+
         return config.recipients == null ? List.of() : config.recipients;
+    }
+
+    private String firstNonBlankEnv(String preferredEnvName, String fallback1, String fallback2, String defaultValue) {
+        String[] candidates = new String[]{preferredEnvName, fallback1, fallback2};
+        for (String c : candidates) {
+            if (c == null || c.isBlank()) {
+                continue;
+            }
+            String v = System.getenv(c);
+            if (v != null && !v.isBlank()) {
+                return v.trim();
+            }
+        }
+        return defaultValue;
     }
 
     /**
@@ -91,6 +123,10 @@ public class NotificationService {
             System.out.println("[Notification] No high-confidence violations to report.");
             return;
         }
+        if (smtpUser == null || smtpUser.isBlank() || smtpPass == null || smtpPass.isBlank()) {
+            System.out.println("[Notification] SMTP credentials not configured; expected SMTP_USERNAME/SMTP_PASSWORD or SMTP_USER/SMTP_PASS.");
+            return;
+        }
         if (fromAddress == null || fromAddress.isBlank()) {
             System.out.println("[Notification] Sender address not configured; skipping alerts.");
             return;
@@ -100,16 +136,11 @@ public class NotificationService {
             return;
         }
 
-        for (ViolationEvent event : events) {
-            try {
-                sendViolationEmail(event);
-                System.out.printf("[Notification] Alert sent for track %d (%.2f–%.2fs)%n",
-                        event.trackId, event.startSec, event.endSec);
-            } catch (Exception e) {
-                System.err.printf("[Notification] Failed to send alert for track %d: %s%n",
-                        event.trackId, e.getMessage());
-                // Do NOT rethrow — notification failure must not fail the overall job.
-            }
+        try {
+            sendViolationSummaryEmail(events, examId);
+            System.out.printf("[Notification] Consolidated alert sent for %d violations%n", events.size());
+        } catch (Exception e) {
+            System.err.printf("[Notification] Failed to send consolidated alert: %s%n", e.getMessage());
         }
     }
 
@@ -134,10 +165,11 @@ public class NotificationService {
                 event.durationSec = interval.getDuration();
                 event.peakScore = interval.getPeakScore();
                 event.dominantSignals = interval.getDominantSignals();
-                event.clipPath = String.format(
-                        "job_store/%s/snapshots/track_%d_t%.1f.mp4",
-                        jobId, event.trackId, event.startSec
-                );
+                Path clipAbsPath = Paths.get(System.getProperty("user.dir"))
+                        .getParent().resolve("job_store").resolve(jobId)
+                        .resolve("snapshots").resolve(String.format("track_%d_t%.1f.mp4", event.trackId, event.startSec))
+                        .toAbsolutePath().normalize();
+                event.clipPath = clipAbsPath.toString();
                 event.clipUrl = String.format(
                         "%s/static/%s/snapshots/track_%d_t%.1f.mp4",
                         cvServiceBaseUrl, jobId, event.trackId, event.startSec
@@ -149,7 +181,7 @@ public class NotificationService {
         return events;
     }
 
-    private void sendViolationEmail(ViolationEvent event) throws MessagingException {
+    private void sendViolationSummaryEmail(List<ViolationEvent> events, String examId) throws MessagingException {
         Properties props = new Properties();
         props.put("mail.smtp.auth", "true");
         props.put("mail.smtp.starttls.enable", Boolean.toString(useTls));
@@ -169,42 +201,60 @@ public class NotificationService {
         }
 
         message.setSubject(String.format(
-                "[Anti-Cheat Alert] Exam %s — Track %d flagged (score: %.2f)",
-                event.examId, event.trackId, event.peakScore
+                "[Anti-Cheat Alert] Exam %s — %d Violations Detected",
+                examId, events.size()
         ));
 
         Multipart multipart = new MimeMultipart();
 
-        MimeBodyPart textPart = new MimeBodyPart();
-        textPart.setText(buildEmailBody(event), "utf-8", "plain");
-        multipart.addBodyPart(textPart);
+        MimeBodyPart htmlPart = new MimeBodyPart();
+        htmlPart.setContent(buildSummaryEmailBody(events, examId), "text/html; charset=utf-8");
+        multipart.addBodyPart(htmlPart);
+
+        for (ViolationEvent event : events) {
+            java.io.File file = new java.io.File(event.clipPath);
+            if (file.exists()) {
+                MimeBodyPart attachmentPart = new MimeBodyPart();
+                try {
+                    attachmentPart.attachFile(file);
+                    multipart.addBodyPart(attachmentPart);
+                } catch (Exception ex) {
+                    System.err.println("[Notification] Warning: Could not attach file: " + file.getAbsolutePath());
+                }
+            } else {
+                System.err.println("[Notification] Warning: clip file not found to attach: " + file.getAbsolutePath());
+            }
+        }
 
         message.setContent(multipart);
         Transport.send(message);
     }
 
-    private String buildEmailBody(ViolationEvent event) {
-        String dominant = event.dominantSignals == null ? "" : String.join(", ", event.dominantSignals);
-        return String.format("""
-                CHEATING VIOLATION DETECTED
-                ============================
-                Exam ID:          %s
-                Track ID:         %d
-                Time window:      %.1f s — %.1f s (duration: %.1f s)
-                Peak score:       %.3f
-                Dominant signals: %s
-                Detected at:      %s
-
-                Clip URL: %s
-
-                This is an automated alert from the Classroom Anti-Cheat System.
-                """,
-                event.examId, event.trackId,
-                event.startSec, event.endSec, event.durationSec,
-                event.peakScore,
-                dominant,
-                event.detectedAt,
-                event.clipUrl
-        );
+    private String buildSummaryEmailBody(List<ViolationEvent> events, String examId) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("<html><body style='font-family: sans-serif;'>");
+        sb.append("<h2 style='color: #d9534f;'>Classroom Anti-Cheat System</h2>");
+        sb.append("<p>The system has detected potential violations. Please review the details below:</p>");
+        sb.append("<ul>");
+        sb.append(String.format("<li><b>Exam ID:</b> %s</li>", examId));
+        sb.append(String.format("<li><b>Total Violations:</b> %d</li>", events.size()));
+        sb.append("</ul><hr/>");
+        
+        for (ViolationEvent event : events) {
+            String dominant = event.dominantSignals == null || event.dominantSignals.isEmpty() ? "None" : String.join(", ", event.dominantSignals);
+            sb.append("<div style='margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; background: #f9f9f9;'>");
+            sb.append(String.format("<h3 style='margin-top: 0;'>Track ID: %d</h3>", event.trackId));
+            sb.append("<ul>");
+            sb.append(String.format("<li><b>Time Window:</b> %.1f s &mdash; %.1f s (Duration: %.1f s)</li>", event.startSec, event.endSec, event.durationSec));
+            sb.append(String.format("<li><b>Dominant Signals:</b> %s</li>", dominant));
+            sb.append(String.format("<li><b>Detected At:</b> %s</li>", event.detectedAt));
+            sb.append("</ul>");
+            sb.append(String.format("<p><b>Review Clip:</b> See attached file <i>track_%d_t%.1f.mp4</i></p>", event.trackId, event.startSec));
+            sb.append("</div>");
+        }
+        
+        sb.append("<p style='font-size: 0.9em; color: #777;'>This is an automated alert. Please do not reply to this email.</p>");
+        sb.append("</body></html>");
+        return sb.toString();
     }
 }

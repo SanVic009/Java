@@ -28,3 +28,7 @@ dist/
 .idea/
 .vscode/
 *.iml
+
+
+experiment_videos/
+*.swp

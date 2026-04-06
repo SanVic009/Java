@@ -3,9 +3,13 @@ package com.anticheat;
 import com.anticheat.model.AnalysisResponse;
 import com.anticheat.model.ExamRequest;
 import com.anticheat.model.NotificationConfig;
+import com.anticheat.postcv.JavaPostCvAllRunner;
+import com.anticheat.postcv.JavaPhase2Scorer;
+import com.anticheat.postcv.Phase2ParityDiff;
 import com.anticheat.report.TerminalReporter;
 import com.anticheat.service.AnalysisClient;
 import com.anticheat.service.NotificationService;
+import com.anticheat.util.DotEnvLoader;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
@@ -26,7 +30,38 @@ public class Main {
     private static final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
     public static void main(String[] args) {
+        // Load .env from the orchestrator directory (or its parent) before anything else.
+        DotEnvLoader.load(Paths.get(System.getProperty("user.dir")));
         try {
+            if (hasFlag(args, "--web")) {
+                int webPort = 7070;
+                String portVal = valueAfter(args, "--port");
+                if (portVal != null) {
+                    webPort = Integer.parseInt(portVal);
+                }
+                String cvUrl = valueAfter(args, "--cv-url");
+                if (cvUrl == null) cvUrl = "http://localhost:8000";
+                reporter.printStatus("Starting Web Server on port " + webPort + " (CV service: " + cvUrl + ")");
+                WebServer webServer = new WebServer(cvUrl);
+                webServer.start(webPort);
+                return;
+            }
+
+            if (hasFlag(args, "--java-postcv-all")) {
+                runJavaPostCvAll(args);
+                return;
+            }
+
+            if (hasFlag(args, "--java-phase2-parity")) {
+                runJavaPhase2Parity(args);
+                return;
+            }
+
+            if (hasFlag(args, "--java-phase2")) {
+                runJavaPhase2(args);
+                return;
+            }
+
             if (args.length == 0) {
                 printUsage();
                 runDemo();
@@ -42,6 +77,82 @@ public class Main {
             reporter.printError(e.getMessage());
             System.exit(1);
         }
+    }
+
+    private static void runJavaPostCvAll(String[] args) throws Exception {
+        String jobDirRaw = valueAfter(args, "--job-dir");
+        if (jobDirRaw == null || jobDirRaw.isBlank()) {
+            throw new IllegalArgumentException("--java-postcv-all requires --job-dir <path>");
+        }
+
+        Path jobDir = Paths.get(jobDirRaw).toAbsolutePath().normalize();
+        String examId = valueAfter(args, "--exam-id");
+        if (examId == null || examId.isBlank()) {
+            examId = jobDir.getFileName().toString();
+        }
+
+        reporter.printStatus("Running all Java post-CV phases for: " + jobDir);
+        JavaPostCvAllRunner runner = new JavaPostCvAllRunner();
+        AnalysisResponse response = runner.run(jobDir, examId);
+        reporter.printStatus("Java post-CV all phases completed.");
+        reporter.printStatus("Summary: " + jobDir.resolve("postcv_java_summary.json"));
+        reporter.printReport(response);
+    }
+
+    private static void runJavaPhase2Parity(String[] args) throws Exception {
+        String jobDirRaw = valueAfter(args, "--job-dir");
+        if (jobDirRaw == null || jobDirRaw.isBlank()) {
+            throw new IllegalArgumentException("--java-phase2-parity requires --job-dir <path>");
+        }
+
+        Path jobDir = Paths.get(jobDirRaw).toAbsolutePath().normalize();
+        String examId = valueAfter(args, "--exam-id");
+        if (examId == null || examId.isBlank()) {
+            examId = jobDir.getFileName().toString();
+        }
+
+        Path pyResults = jobDir.resolve("phase2_results.json");
+        if (!Files.exists(pyResults)) {
+            throw new IllegalArgumentException("Missing python baseline file: " + pyResults);
+        }
+
+        reporter.printStatus("Running Java Phase 2 parity mode for: " + jobDir);
+        JavaPhase2Scorer scorer = new JavaPhase2Scorer();
+        scorer.run(
+                jobDir,
+                examId,
+                "phase2_results_java.json",
+                "phase2_stats_java.json",
+                "phase2_frame_scores_java.jsonl"
+        );
+
+        Path javaResults = jobDir.resolve("phase2_results_java.json");
+        Phase2ParityDiff diff = new Phase2ParityDiff();
+        Phase2ParityDiff.ParityReport report = diff.compare(pyResults, javaResults);
+
+        reporter.printStatus("Parity diff completed.");
+        System.out.println(report.toSummaryString());
+        reporter.printStatus("Python: " + pyResults);
+        reporter.printStatus("Java:   " + javaResults);
+    }
+
+    private static void runJavaPhase2(String[] args) throws Exception {
+        String jobDirRaw = valueAfter(args, "--job-dir");
+        if (jobDirRaw == null || jobDirRaw.isBlank()) {
+            throw new IllegalArgumentException("--java-phase2 requires --job-dir <path>");
+        }
+
+        Path jobDir = Paths.get(jobDirRaw).toAbsolutePath().normalize();
+        String examId = valueAfter(args, "--exam-id");
+        if (examId == null || examId.isBlank()) {
+            examId = jobDir.getFileName().toString();
+        }
+
+        reporter.printStatus("Running Java post-CV Phase 2 for job dir: " + jobDir);
+        JavaPhase2Scorer scorer = new JavaPhase2Scorer();
+        AnalysisResponse response = scorer.run(jobDir, examId);
+        reporter.printStatus("Java Phase 2 completed.");
+        reporter.printReport(response);
     }
 
     private static void runAnalysis(ExamRequest request, int pollIntervalSeconds, int timeoutMinutes) {
@@ -63,7 +174,23 @@ public class Main {
         try {
             String jobId = client.submitAnalysis(request);
             reporter.printStatus("Job submitted: " + jobId);
-            AnalysisResponse response = client.waitForResult(jobId);
+            AnalysisResponse pythonResponse = client.waitForResult(jobId);
+            
+            reporter.printStatus("Python Phase 1 finished! Delegating Phase 2 scoring and Phase 3 rendering to Java backend...");
+            AnalysisResponse response = null;
+            try {
+                // job_store is inside the project root (classroom-anticheat/job_store)
+                Path jobDir = Paths.get(System.getProperty("user.dir"))
+                        .getParent().resolve("job_store").resolve(jobId)
+                        .toAbsolutePath().normalize();
+                
+                JavaPostCvAllRunner javaRunner = new JavaPostCvAllRunner();
+                response = javaRunner.run(jobDir, request.getExamId());
+            } catch (Exception e) {
+                reporter.printError("Failed to run Java backend: " + e.getMessage());
+                response = pythonResponse;
+            }
+
             reporter.printReport(response);
 
             try {
@@ -97,7 +224,7 @@ public class Main {
         String examId = null;
         String videoPath = null;
         int fps = 5;
-        boolean renderAnnotated = false;
+        boolean renderAnnotated = true;
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
@@ -178,6 +305,10 @@ public class Main {
         System.out.println("  --poll-interval <seconds>  Status polling interval (default: 3)");
         System.out.println("  --timeout <minutes> Max wait time before aborting (default: 120)");
         System.out.println("  --render-annotated-video  Enable Phase 3 annotated video rendering");
+        System.out.println("  --java-phase2 --job-dir <path> [--exam-id <id>]  Run Java Phase 2 from persisted Phase 1 artifacts");
+        System.out.println("  --java-phase2-parity --job-dir <path> [--exam-id <id>]  Run Java Phase 2 and print parity diff vs python results");
+        System.out.println("  --java-postcv-all --job-dir <path> [--exam-id <id>]  Run Java Phase2+Phase3+snapshots from persisted artifacts");
+        System.out.println("  --web [--port <port>] [--cv-url <url>]  Start the web server (default port: 7070)");
         System.out.println("  --help, -h          Show this help message");
         System.out.println();
         System.out.println("Examples:");
@@ -198,6 +329,27 @@ public class Main {
         System.out.println();
         System.out.println("Example:");
         System.out.println("  java -jar anticheat.jar --exam-id demo_001 --video /path/to/video.mp4 --fps 5");
+        System.out.println("  java -jar anticheat.jar --java-phase2 --job-dir ./job_store/<job_id> --exam-id demo_001");
+        System.out.println("  java -jar anticheat.jar --java-phase2-parity --job-dir ./job_store/<job_id> --exam-id demo_001");
+        System.out.println("  java -jar anticheat.jar --java-postcv-all --job-dir ./job_store/<job_id> --exam-id demo_001");
         System.out.println();
+    }
+
+    private static boolean hasFlag(String[] args, String flag) {
+        for (String arg : args) {
+            if (flag.equals(arg)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static String valueAfter(String[] args, String key) {
+        for (int i = 0; i < args.length - 1; i++) {
+            if (key.equals(args[i])) {
+                return args[i + 1];
+            }
+        }
+        return null;
     }
 }

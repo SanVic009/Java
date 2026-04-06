@@ -7,6 +7,8 @@ import com.anticheat.service.AnalysisClient;
 import com.anticheat.service.NotificationService;
 import io.javalin.Javalin;
 import io.javalin.http.UploadedFile;
+import io.javalin.config.SizeUnit;
+import io.javalin.json.JavalinGson;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -17,6 +19,10 @@ import java.util.Map;
 import java.util.UUID;
 
 public class WebServer {
+    private static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder()
+            .setPrettyPrinting()
+            .create();
+
     private final AnalysisClient client;
     private final String cvServiceUrl;
 
@@ -36,7 +42,13 @@ public class WebServer {
         }
 
         Javalin app = Javalin.create(config -> {
+            config.jsonMapper(new JavalinGson(GSON));
             config.staticFiles.add("/public");
+            config.jetty.multipartConfig.maxFileSize(200, SizeUnit.MB);
+            config.jetty.multipartConfig.maxTotalRequestSize(200, SizeUnit.MB);
+            config.plugins.enableCors(cors -> cors.add(it -> {
+                it.anyHost();
+            }));
         }).start(port);
 
         System.out.println("Web Server started on http://localhost:" + port);
@@ -44,6 +56,7 @@ public class WebServer {
         app.post("/api/analyze", ctx -> {
             UploadedFile videoFile = ctx.uploadedFile("video");
             if (videoFile == null) {
+                System.err.println("[WebServer POST /api/analyze] No video file in multipart request");
                 ctx.status(400).json(Map.of("error", "No video file provided"));
                 return;
             }
@@ -73,6 +86,8 @@ public class WebServer {
 
                 ctx.json(Map.of("jobId", jobId, "examId", examId));
             } catch (Exception e) {
+                System.err.println("[WebServer POST /api/analyze] Error submitting to Python CV: " + e.getMessage());
+                e.printStackTrace(System.err);
                 ctx.status(500).json(Map.of("error", e.getMessage()));
             }
         });
@@ -83,6 +98,8 @@ public class WebServer {
                 AnalysisClient.JobStatus status = client.getJobStatus(jobId);
                 ctx.json(status);
             } catch (Exception e) {
+                System.err.println("[WebServer GET /api/status/" + jobId + "] " + e.getMessage());
+                e.printStackTrace(System.err);
                 ctx.status(500).json(Map.of("error", e.getMessage()));
             }
         });
@@ -93,6 +110,8 @@ public class WebServer {
                 AnalysisResponse result = client.getResult(jobId);
                 ctx.json(result);
             } catch (Exception e) {
+                System.err.println("[WebServer GET /api/result/" + jobId + "] " + e.getMessage());
+                e.printStackTrace(System.err);
                 ctx.status(500).json(Map.of("error", e.getMessage()));
             }
         });
@@ -107,12 +126,17 @@ public class WebServer {
                     if (Files.exists(videoPath)) {
                         ctx.writeSeekableStream(Files.newInputStream(videoPath), "video/mp4");
                     } else {
-                        ctx.status(404).json(Map.of("error", "Video file not found on disk"));
+                        System.err.println("[WebServer GET /api/video/" + jobId + "] File not found: " + filePath);
+                        ctx.status(404).json(Map.of("error", "Video file not found on disk: " + filePath));
                     }
                 } else {
-                    ctx.status(404).json(Map.of("error", "Annotated video not ready"));
+                    String videoStatus = result.getAnnotatedVideo() == null ? "null" : result.getAnnotatedVideo().getStatus();
+                    System.err.println("[WebServer GET /api/video/" + jobId + "] Annotated video not ready. Status: " + videoStatus);
+                    ctx.status(404).json(Map.of("error", "Annotated video not ready (status: " + videoStatus + ")"));
                 }
             } catch (Exception e) {
+                System.err.println("[WebServer GET /api/video/" + jobId + "] " + e.getMessage());
+                e.printStackTrace(System.err);
                 ctx.status(500).json(Map.of("error", e.getMessage()));
             }
         });

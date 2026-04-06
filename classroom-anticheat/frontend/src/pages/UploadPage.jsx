@@ -10,7 +10,7 @@ import {
   normalizeSignal,
   normalizeResult,
   parseBackendPayload,
-  resolveVideoPath,
+  resolveVideoUrl,
   signalPillTone,
 } from '../lib/analysisUtils';
 
@@ -68,29 +68,39 @@ export default function UploadPage() {
     setError('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/analyze`, {
+      // Build multipart form data with the actual video file
+      const formData = new FormData();
+      formData.append('video', file);
+      formData.append('examId', examId.trim());
+
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          exam_id: examId.trim(),
-          video_path: file.name,
-          render_annotated_video: renderAnnotatedVideo,
-        }),
+        body: formData,
       });
 
-      const payload = await response.json().catch(() => ({}));
+      const rawText = await response.text();
+      let payload;
+      try {
+        payload = JSON.parse(rawText);
+      } catch (parseErr) {
+        console.error('[Analyze] Response is not valid JSON. Status:', response.status, 'Body:', rawText);
+        throw new Error(`Server returned non-JSON response (HTTP ${response.status}). Check the Java server logs.`);
+      }
 
       if (!response.ok) {
+        console.error('[Analyze] Server returned error. Status:', response.status, 'Payload:', payload);
         throw new Error(
           payload?.message ||
             payload?.detail ||
-            'Something went wrong. Check that the analysis server is running.',
+            payload?.error ||
+            `Server error (HTTP ${response.status}). Check that the Java web server is running.`,
         );
       }
 
-      const submittedJobId = payload?.job_id;
+      const submittedJobId = payload?.jobId || payload?.job_id;
       if (!submittedJobId) {
-        throw new Error('Job submission succeeded but no job_id was returned.');
+        console.error('[Analyze] No jobId in response payload:', payload);
+        throw new Error('Job submission succeeded but no jobId was returned.');
       }
 
       setJobId(submittedJobId);
@@ -98,11 +108,16 @@ export default function UploadPage() {
       setJobProgress(0);
       setStatus('processing');
     } catch (e) {
+      if (e instanceof TypeError && e.message.includes('fetch')) {
+        console.error('[Analyze] Network error — is the Java server running at', API_BASE_URL, '?', e);
+      } else {
+        console.error('[Analyze] Error submitting analysis:', e);
+      }
       setStatus('error');
       setError(
         e instanceof Error
           ? e.message
-          : 'Something went wrong. Check that the analysis server is running.',
+          : 'Something went wrong. Check that the Java web server is running.',
       );
     }
   };
@@ -115,11 +130,19 @@ export default function UploadPage() {
     const pollStatus = async () => {
       if (cancelled) return;
       try {
-        const response = await fetch(`${API_BASE_URL}/status/${jobId}`);
-        const payload = await response.json().catch(() => ({}));
+        const response = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
+        const rawText = await response.text();
+        let payload;
+        try {
+          payload = JSON.parse(rawText);
+        } catch (parseErr) {
+          console.error('[PollStatus] Non-JSON response from /api/status. Status:', response.status, 'Body:', rawText);
+          throw new Error(`Status endpoint returned non-JSON (HTTP ${response.status}).`);
+        }
 
         if (!response.ok) {
-          throw new Error(payload?.detail || payload?.message || 'Failed to fetch job status.');
+          console.error('[PollStatus] Error response from /api/status. Status:', response.status, 'Payload:', payload);
+          throw new Error(payload?.detail || payload?.message || payload?.error || `Status poll failed (HTTP ${response.status}).`);
         }
 
         const nextStatus = String(payload?.status || 'queued').toLowerCase();
@@ -134,17 +157,20 @@ export default function UploadPage() {
         if (nextStatus === 'failed') {
           let failureMessage = nextMessage || 'Analysis failed.';
           try {
-            const failedResultResp = await fetch(`${API_BASE_URL}/result/${jobId}`);
-            const failedPayload = await failedResultResp.json().catch(() => ({}));
-            const apiMessage = failedPayload?.error?.message;
+            const failedResultResp = await fetch(`${API_BASE_URL}/api/result/${jobId}`);
+            const failedText = await failedResultResp.text();
+            let failedPayload;
+            try { failedPayload = JSON.parse(failedText); } catch { failedPayload = {}; }
+            console.error('[PollStatus] Job failed. Result payload:', failedPayload);
+            const apiMessage = failedPayload?.error?.message || failedPayload?.error;
             const phase1Available = failedPayload?.error?.phase1_artifacts_available;
             if (apiMessage) {
               failureMessage = phase1Available
                 ? `${apiMessage} Phase 1 artifacts are available in job_store/${jobId}/.`
-                : apiMessage;
+                : typeof apiMessage === 'string' ? apiMessage : JSON.stringify(apiMessage);
             }
-          } catch {
-            // fallback to status message
+          } catch (resultErr) {
+            console.error('[PollStatus] Could not fetch failure details:', resultErr);
           }
           if (!cancelled) {
             setStatus('error');
@@ -154,34 +180,64 @@ export default function UploadPage() {
         }
 
         if (nextStatus === 'completed') {
-          const resultResponse = await fetch(`${API_BASE_URL}/result/${jobId}`);
-          const resultPayload = await resultResponse.json().catch(() => ({}));
-          if (!resultResponse.ok) {
-            throw new Error(resultPayload?.detail || resultPayload?.message || 'Failed to fetch analysis result.');
-          }
+          try {
+            const resultResponse = await fetch(`${API_BASE_URL}/api/result/${jobId}`);
+            const resultText = await resultResponse.text();
+            let resultPayload;
+            try {
+              resultPayload = JSON.parse(resultText);
+            } catch (parseErr) {
+              console.error('[FetchResult] Non-JSON response from /api/result. Status:', resultResponse.status, 'Body:', resultText);
+              throw new Error(`Result endpoint returned non-JSON (HTTP ${resultResponse.status}).`);
+            }
 
-          if (resultPayload?.status === 'failed') {
-            const message =
-              resultPayload?.error?.message ||
-              'Analysis failed while preparing the final result payload.';
+            if (!resultResponse.ok) {
+              console.error('[FetchResult] Error response. Status:', resultResponse.status, 'Payload:', resultPayload);
+              throw new Error(resultPayload?.detail || resultPayload?.message || resultPayload?.error || `Result fetch failed (HTTP ${resultResponse.status}).`);
+            }
+
+            // Check if the result wrapper says "failed"
+            if (resultPayload?.status === 'failed') {
+              const message =
+                resultPayload?.error?.message ||
+                (typeof resultPayload?.error === 'string' ? resultPayload.error : null) ||
+                'Analysis failed while preparing the final result payload.';
+              console.error('[FetchResult] Result status is "failed":', resultPayload);
+              if (!cancelled) {
+                setStatus('error');
+                setError(message);
+              }
+              return;
+            }
+
+            const parsed = parseBackendPayload(resultPayload);
+            const normalizedTracks = normalizeResult(resultPayload);
+
+            if (!normalizedTracks || normalizedTracks.length === 0) {
+              console.error('[FetchResult] No tracks parsed from result payload. Raw payload:', resultPayload, 'Parsed:', parsed);
+            }
+
+            if (!cancelled) {
+              setResult({ ...parsed, results: normalizedTracks });
+              setStatus('results');
+            }
+          } catch (resultErr) {
+            console.error('[FetchResult] Error fetching/parsing result:', resultErr);
             if (!cancelled) {
               setStatus('error');
-              setError(message);
+              setError(resultErr instanceof Error ? resultErr.message : 'Failed to fetch analysis result.');
             }
-            return;
-          }
-
-          const parsed = parseBackendPayload(resultPayload);
-          const normalizedTracks = normalizeResult(resultPayload);
-          if (!cancelled) {
-            setResult({ ...parsed, results: normalizedTracks });
-            setStatus('results');
           }
           return;
         }
 
         pollingTickRef.current = setTimeout(pollStatus, 3000);
       } catch (e) {
+        if (e instanceof TypeError && e.message.includes('fetch')) {
+          console.error('[PollStatus] Network error — server may be down:', e);
+        } else {
+          console.error('[PollStatus] Error during status polling:', e);
+        }
         if (!cancelled) {
           setStatus('error');
           setError(e instanceof Error ? e.message : 'Failed while polling job status.');
@@ -213,14 +269,14 @@ export default function UploadPage() {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/result/${jobId}`);
+        const response = await fetch(`${API_BASE_URL}/api/result/${jobId}`);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || cancelled) return;
         const parsed = parseBackendPayload(payload);
         const normalizedTracks = normalizeResult(payload);
         if (!cancelled) setResult({ ...parsed, results: normalizedTracks });
-      } catch {
-        // best-effort refresh only
+      } catch (e) {
+        console.error('[VideoRefresh] Error refreshing annotated video status:', e);
       }
     }, 5000);
 
@@ -234,14 +290,14 @@ export default function UploadPage() {
     <PageContainer>
       <TopBar
         backToHome
-        right={<div className="text-sm font-medium text-slate-500">Upload & Analysis</div>}
+        right={<div className="text-sm font-medium text-slate-500">Upload &amp; Analysis</div>}
       />
 
       <section className="mx-auto max-w-5xl px-6 pb-14 pt-10">
         <GlassCard className="p-7 md:p-10">
           <h2 className="text-2xl font-semibold text-slate-900">Upload Exam Footage</h2>
           <p className="mt-2 text-[16px] leading-relaxed text-slate-600">
-            Supported format: MP4. Processing happens locally via your analysis server.
+            Supported format: MP4. The video will be uploaded to the Java analysis server.
           </p>
 
           {status === 'processing' ? (
@@ -276,15 +332,15 @@ export default function UploadPage() {
                       <div className="rounded-lg p-8 text-center text-slate-600">
                         Annotated video still rendering...
                       </div>
-                    ) : result.annotated_video_path ? (
+                    ) : jobId ? (
                       <video
                         controls
                         className="w-full rounded-lg"
-                        src={resolveVideoPath(result.annotated_video_path)}
+                        src={resolveVideoUrl(jobId)}
                       />
                     ) : (
                       <div className="rounded-lg p-8 text-center text-slate-600">
-                        Annotated video path not returned by server.
+                        Annotated video not available.
                       </div>
                     )}
                   </div>
@@ -364,7 +420,7 @@ export default function UploadPage() {
                 />
                 <p className="text-[18px] text-slate-800">Drag and drop your video file here</p>
                 <p className="mt-2 text-[16px] text-slate-600">or click to browse</p>
-                {file && <p className="mt-4 text-sm text-indigo-600">Selected: {file.name}</p>}
+                {file && <p className="mt-4 text-sm text-indigo-600">Selected: {file.name} ({(file.size / 1048576).toFixed(1)} MB)</p>}
               </label>
 
               <div className="mt-8">
@@ -400,7 +456,7 @@ export default function UploadPage() {
 
               {status === 'error' && (
                 <div className="mt-6 rounded-lg border border-red-200 bg-red-50 p-4 text-sm leading-relaxed text-red-700">
-                  {error || 'Something went wrong. Check that the analysis server is running.'}
+                  {error || 'Something went wrong. Check that the Java web server is running.'}
                   {jobId && <div className="mt-2 text-xs text-red-600">Job ID: {jobId}</div>}
                 </div>
               )}

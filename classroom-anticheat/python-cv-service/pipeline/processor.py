@@ -34,8 +34,28 @@ def validate_video_path(raw_path: str, project_root: Path) -> Path:
             "Place video files under the 'videos/' directory and use filenames only."
         )
 
+    # Strategy 1: Try raw_path directly from project_root.
+    # This covers cases like 'java-orchestrator/videos/file.mp4'.
+    candidate_direct = (project_root / raw_path).resolve()
+    if candidate_direct.exists() and candidate_direct.is_file():
+        for base in config.ALLOWED_VIDEO_BASE_DIRS:
+            allowed_root = (project_root / base).resolve()
+            if str(candidate_direct).startswith(str(allowed_root)):
+                return candidate_direct
+
+    # Strategy 2: Try appending raw_path to each base.
+    # This covers cases like 'file.mp4' when base is 'videos/'.
     for base in config.ALLOWED_VIDEO_BASE_DIRS:
         candidate = (project_root / base / raw_path).resolve()
+        allowed_root = (project_root / base).resolve()
+        if str(candidate).startswith(str(allowed_root)) and candidate.exists() and candidate.is_file():
+            return candidate
+
+    # Strategy 3: Try just the filename in each base.
+    # This covers cases like 'videos/file.mp4' when base is 'java-orchestrator/videos/'.
+    filename = Path(raw_path).name
+    for base in config.ALLOWED_VIDEO_BASE_DIRS:
+        candidate = (project_root / base / filename).resolve()
         allowed_root = (project_root / base).resolve()
         if str(candidate).startswith(str(allowed_root)) and candidate.exists() and candidate.is_file():
             return candidate

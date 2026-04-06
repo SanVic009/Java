@@ -82,12 +82,13 @@ class PoseEstimator:
         self.mp_face_mesh = mp.solutions.face_mesh
         self._frame_width: int = 0
         self._frame_height: int = 0
+        face_mesh_confidence = float(getattr(config, "FACE_MESH_MIN_DETECTION_CONFIDENCE", min_detection_confidence))
         self.face_mesh = self.mp_face_mesh.FaceMesh(
             max_num_faces=max_faces,
             static_image_mode=True,
             refine_landmarks=True,  # Enable iris landmarks
-            min_detection_confidence=min_detection_confidence,
-            min_tracking_confidence=min_detection_confidence
+            min_detection_confidence=face_mesh_confidence,
+            min_tracking_confidence=face_mesh_confidence
         )
         # YOLOv8-pose: multi-person keypoint detection in one call
         # Replaces MediaPipe Pose which only returns one skeleton per image
@@ -284,11 +285,12 @@ class PoseEstimator:
         for model_path in candidates:
             if model_path.exists():
                 try:
+                    yunet_score_threshold = float(getattr(config, "FACE_DETECTOR_SCORE_THRESHOLD", 0.45))
                     detector = cv2.FaceDetectorYN_create(
                         str(model_path),
                         "",
                         (320, 320),
-                        0.6,
+                        yunet_score_threshold,
                         0.3,
                         5000,
                     )
@@ -313,7 +315,10 @@ class PoseEstimator:
                 _, faces = self._face_detector.detect(crop)
                 if faces is not None and len(faces) > 0:
                     # Format: [x,y,w,h, l_eye_x,l_eye_y, r_eye_x,r_eye_y, nose_x,nose_y, l_mouth_x,l_mouth_y, r_mouth_x,r_mouth_y, score]
-                    best = max(faces, key=lambda row: float(row[14]))
+                    score_threshold = float(getattr(config, "FACE_DETECTOR_SCORE_THRESHOLD", 0.45))
+                    valid_faces = [f for f in faces if float(f[14]) >= score_threshold]
+                    if valid_faces:
+                        best = max(valid_faces, key=lambda row: float(row[14]))
                     x, y, fw, fh = [int(v) for v in best[:4]]
                     x = max(0, x)
                     y = max(0, y)
@@ -336,7 +341,8 @@ class PoseEstimator:
 
         # Haar fallback (no explicit confidence/keypoints from detector).
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        faces = self._haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(25, 25))
+        haar_min_neighbors = int(getattr(config, "FACE_DETECTOR_HAAR_MIN_NEIGHBORS", 3))
+        faces = self._haar.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=haar_min_neighbors, minSize=(20, 20))
         if len(faces) > 0:
             # Choose largest face candidate.
             x, y, fw, fh = max(faces, key=lambda b: int(b[2] * b[3]))
