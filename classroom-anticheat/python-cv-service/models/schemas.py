@@ -21,6 +21,9 @@ class AnalysisRequest(BaseModel):
     # Phase 3 rendering (pure visualization; no CV inference). Default off.
     render_annotated_video: bool = False
 
+    # Stop after Phase 1 (feature extraction) and let Java do the rest.
+    phase1_only: bool = False
+
     @field_validator("video_path")
     @classmethod
     def no_traversal(cls, v: str) -> str:

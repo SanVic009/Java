@@ -152,7 +152,9 @@ public class AnalysisClient {
 
             Object resultObj = body.get("result");
             if (resultObj == null) {
-                throw new AnalysisException("Job result not present yet for job_id: " + jobId);
+                // In phase1_only mode, Python won't have a result payload.
+                // We return a skeleton response so the orchestrator can continue to Phase 2.
+                return new AnalysisResponse();
             }
             // Re-serialize resultObj back to JSON string to parse as AnalysisResponse.
             String resultJson = gson.toJson(resultObj);

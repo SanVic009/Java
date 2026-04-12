@@ -294,19 +294,36 @@ def _run_job(job_id: str, request_dict: Dict[str, Any]) -> None:
         processor = VideoProcessor(request)
         processor.run(job_dir, status_path=_status_path(job_id))
 
+        # Check the final status from the status file (updated in processor.run)
+        final_status_info = _read_json(_status_path(job_id))
+        is_failed = final_status_info.get("status") == "failed"
+
+        if is_failed:
+            # Error was already reported in processor.run() or elsewhere
+            return
+
         # Post-process: ensure result JSON exists where GET /result expects.
-        if results_path.exists() and _read_json(_status_path(job_id)).get("status") != "failed":
+        if results_path.exists():
             snapshots = _extract_violation_snapshots(job_id, request_dict)
             extra_fields = {"snapshot_count": len(snapshots)}
             _update_status(
                 job_id,
                 status="completed",
                 progress=1.0,
-                message="Completed",
+                message="Completed (All Phases)",
                 extra=extra_fields,
             )
+        elif request.phase1_only:
+             # Already updated in processor.run to completed/cv_phase1_complete, 
+             # but we'll ensure it's "completed" for the caller.
+             _update_status(
+                job_id,
+                status="completed",
+                progress=1.0,
+                message="Completed (Phase 1 CV Extraction Only)",
+            )
         else:
-            _update_status(job_id, status="failed", progress=0.0, message="Results missing after run")
+            _update_status(job_id, status="failed", progress=0.0, message="Results missing after run (Phase 1 artifacts available)")
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[JobError] job_id={job_id} error={e}\n{tb}")

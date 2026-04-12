@@ -128,6 +128,18 @@ class VideoProcessor:
                 out_phase1_stats_path=phase1_stats_path,
             )
             phase1_complete = True
+            
+            if self.request.phase1_only:
+                VideoProcessor._update_job_status_details(
+                    status_path,
+                    status="completed",
+                    progress=1.0,
+                    message="CV Phase 1 complete; stopping as requested",
+                    phase1_complete=True,
+                    phase2_complete=False,
+                    annotated_video_status="not_requested",
+                )
+                return {"status": "cv_phase1_complete", "job_id": str(job_dir.name)}
         except Exception as exc:
             VideoProcessor._update_job_status_details(
                 status_path,

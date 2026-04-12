@@ -9,19 +9,29 @@ import io.javalin.Javalin;
 import io.javalin.http.UploadedFile;
 import io.javalin.config.SizeUnit;
 import io.javalin.json.JavalinGson;
+import com.anticheat.postcv.JavaPostCvAllRunner;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class WebServer {
     private static final com.google.gson.Gson GSON = new com.google.gson.GsonBuilder()
             .setPrettyPrinting()
             .create();
+
+    // Track job states on the Java side to handle the hybrid pipeline
+    private static final Map<String, String> jobStates = new ConcurrentHashMap<>();
+    private static final String STATE_PYTHON = "PYTHON_RUNNING";
+    private static final String STATE_JAVA = "JAVA_RUNNING";
+    private static final String STATE_COMPLETED = "COMPLETED";
+    private static final String STATE_FAILED = "FAILED";
 
     private final AnalysisClient client;
     private final String cvServiceUrl;
@@ -75,7 +85,8 @@ public class WebServer {
                     .examId(examId)
                     .videoPath(videoFile.filename())
                     .fpsSampling(5)
-                    .renderAnnotatedVideo(true)
+                    .renderAnnotatedVideo(false) // Java will render Phase 3
+                    .phase1Only(true)            // Python only does CV Phase 1
                     .build();
 
             try {
@@ -95,7 +106,22 @@ public class WebServer {
         app.get("/api/status/{jobId}", ctx -> {
             String jobId = ctx.pathParam("jobId");
             try {
+                String javaState = jobStates.getOrDefault(jobId, STATE_PYTHON);
                 AnalysisClient.JobStatus status = client.getJobStatus(jobId);
+
+                // If Python is done but Java is still post-processing, keep it "running"
+                if (status.status.equalsIgnoreCase("completed") && javaState.equals(STATE_JAVA)) {
+                    status.status = "running";
+                    status.message = "Java Post-Processing (Phase 2 Scoring & Phase 3 Rendering)...";
+                    status.progress = 0.95; // Almost done
+                } else if (javaState.equals(STATE_COMPLETED)) {
+                    status.status = "completed";
+                    status.message = "Analysis complete";
+                    status.progress = 1.0;
+                } else if (javaState.equals(STATE_FAILED)) {
+                    status.status = "failed";
+                }
+
                 ctx.json(status);
             } catch (Exception e) {
                 System.err.println("[WebServer GET /api/status/" + jobId + "] " + e.getMessage());
@@ -107,8 +133,22 @@ public class WebServer {
         app.get("/api/result/{jobId}", ctx -> {
             String jobId = ctx.pathParam("jobId");
             try {
-                AnalysisResponse result = client.getResult(jobId);
-                ctx.json(result);
+                String javaState = jobStates.getOrDefault(jobId, STATE_PYTHON);
+                if (!javaState.equals(STATE_COMPLETED)) {
+                    ctx.status(404).json(Map.of("error", "Results not ready yet. Current state: " + javaState));
+                    return;
+                }
+
+                Path jobDir = Paths.get("job_store").resolve(jobId);
+                Path javaResultPath = jobDir.resolve("phase2_results_java.json");
+                
+                if (Files.exists(javaResultPath)) {
+                    String content = Files.readString(javaResultPath, StandardCharsets.UTF_8);
+                    ctx.contentType("application/json").result(content);
+                } else {
+                    // This shouldn't really happen if state is COMPLETED but we check anyway
+                    ctx.status(404).json(Map.of("error", "Result file missing on disk"));
+                }
             } catch (Exception e) {
                 System.err.println("[WebServer GET /api/result/" + jobId + "] " + e.getMessage());
                 e.printStackTrace(System.err);
@@ -122,6 +162,10 @@ public class WebServer {
                 AnalysisResponse result = client.getResult(jobId);
                 if (result.getAnnotatedVideo() != null && "ready".equals(result.getAnnotatedVideo().getStatus())) {
                     String filePath = result.getAnnotatedVideo().getFilePath();
+                    // Map file path to Java-side output if it looks like the Python one
+                    if (filePath.contains("phase2_annotated.mp4")) {
+                        filePath = filePath.replace("phase2_annotated.mp4", "phase2_annotated_java.mp4");
+                    }
                     Path videoPath = Paths.get(filePath);
                     if (Files.exists(videoPath)) {
                         ctx.writeSeekableStream(Files.newInputStream(videoPath), "video/mp4");
@@ -143,19 +187,37 @@ public class WebServer {
     }
 
     private void startBackgroundMonitor(String jobId, ExamRequest request) {
+        jobStates.put(jobId, STATE_PYTHON);
         new Thread(() -> {
             try {
                 System.out.println("[WebServer] Background monitor started for job: " + jobId);
-                AnalysisResponse response = client.waitForResult(jobId);
-                System.out.println("[WebServer] Job " + jobId + " completed successfully. Triggering notification.");
+                
+                // 1. Wait for Python to finish Phase 1
+                client.waitForResult(jobId);
+                System.out.println("[WebServer] Python Phase 1 finished for " + jobId + ". Delegating to Java...");
+                
+                // Transition to Java post-processing
+                jobStates.put(jobId, STATE_JAVA);
 
+                // 2. Run Java post-CV pipeline (Scoring + Rendering + Snapshots)
+                Path jobDir = Paths.get("job_store").resolve(jobId).toAbsolutePath().normalize();
+                JavaPostCvAllRunner javaRunner = new JavaPostCvAllRunner();
+                AnalysisResponse javaResponse = javaRunner.run(jobDir, request.getExamId());
+                
+                // Mark as completed
+                jobStates.put(jobId, STATE_COMPLETED);
+                System.out.println("[WebServer] Java post-processing completed for " + jobId + ". Triggering notification.");
+
+                // 3. Trigger notification with Java results
                 NotificationConfig notifConfig = NotificationConfig.load();
                 if (notifConfig.enabled && "immediate".equalsIgnoreCase(notifConfig.deliveryMode)) {
                     NotificationService notifier = new NotificationService(notifConfig, cvServiceUrl);
-                    notifier.sendImmediateAlerts(jobId, request.getExamId(), response);
+                    notifier.sendImmediateAlerts(jobId, request.getExamId(), javaResponse);
                 }
             } catch (Exception e) {
+                jobStates.put(jobId, STATE_FAILED);
                 System.err.println("[WebServer] Background monitor failed for job " + jobId + ": " + e.getMessage());
+                e.printStackTrace(System.err);
             }
         }).start();
     }
