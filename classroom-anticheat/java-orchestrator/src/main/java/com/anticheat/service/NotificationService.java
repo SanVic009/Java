@@ -21,8 +21,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.stream.Collectors;
 
 public class NotificationService {
@@ -165,11 +163,10 @@ public class NotificationService {
                 event.durationSec = interval.getDuration();
                 event.peakScore = interval.getPeakScore();
                 event.dominantSignals = interval.getDominantSignals();
-                Path clipAbsPath = Paths.get(System.getProperty("user.dir"))
-                        .getParent().resolve("job_store").resolve(jobId)
-                        .resolve("snapshots").resolve(String.format("track_%d_t%.1f.mp4", event.trackId, event.startSec))
-                        .toAbsolutePath().normalize();
-                event.clipPath = clipAbsPath.toString();
+                event.clipPath = String.format(
+                        "job_store/%s/snapshots/track_%d_t%.1f.mp4",
+                        jobId, event.trackId, event.startSec
+                );
                 event.clipUrl = String.format(
                         "%s/static/%s/snapshots/track_%d_t%.1f.mp4",
                         cvServiceBaseUrl, jobId, event.trackId, event.startSec
@@ -211,21 +208,6 @@ public class NotificationService {
         htmlPart.setContent(buildSummaryEmailBody(events, examId), "text/html; charset=utf-8");
         multipart.addBodyPart(htmlPart);
 
-        for (ViolationEvent event : events) {
-            java.io.File file = new java.io.File(event.clipPath);
-            if (file.exists()) {
-                MimeBodyPart attachmentPart = new MimeBodyPart();
-                try {
-                    attachmentPart.attachFile(file);
-                    multipart.addBodyPart(attachmentPart);
-                } catch (Exception ex) {
-                    System.err.println("[Notification] Warning: Could not attach file: " + file.getAbsolutePath());
-                }
-            } else {
-                System.err.println("[Notification] Warning: clip file not found to attach: " + file.getAbsolutePath());
-            }
-        }
-
         message.setContent(multipart);
         Transport.send(message);
     }
@@ -249,7 +231,9 @@ public class NotificationService {
             sb.append(String.format("<li><b>Dominant Signals:</b> %s</li>", dominant));
             sb.append(String.format("<li><b>Detected At:</b> %s</li>", event.detectedAt));
             sb.append("</ul>");
-            sb.append(String.format("<p><b>Review Clip:</b> See attached file <i>track_%d_t%.1f.mp4</i></p>", event.trackId, event.startSec));
+            sb.append("<p><b>Review Clip:</b></p>");
+            sb.append(String.format("<p><a href='%s' style='display: inline-block; padding: 8px 15px; background: #007bff; color: white; text-decoration: none; border-radius: 3px;'>Watch Clip</a></p>", event.clipUrl));
+            sb.append(String.format("<p><video src='%s' controls width='320' height='240' style='background: black; max-width: 100%%;'></video></p>", event.clipUrl));
             sb.append("</div>");
         }
         
