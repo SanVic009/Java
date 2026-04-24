@@ -22,12 +22,20 @@ export default function HomePage() {
     <PageContainer>
       <TopBar
         right={
-          <Link
-            to="/upload"
-            className="rounded-lg bg-[#6366f1] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#5558e8]"
-          >
-            Open Upload
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              to="/check-integrity"
+              className="rounded-lg border border-indigo-200 bg-white px-4 py-2 text-sm font-semibold text-indigo-700 transition-colors hover:bg-indigo-50"
+            >
+              Check Integrity
+            </Link>
+            <Link
+              to="/upload"
+              className="rounded-lg bg-[#6366f1] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#5558e8]"
+            >
+              Open Upload
+            </Link>
+          </div>
         }
       />
 
@@ -53,10 +61,10 @@ export default function HomePage() {
               Analyze Video
             </Link>
             <Link
-              to="/upload"
+              to="/check-integrity"
               className="inline-flex items-center justify-center rounded-xl border border-slate-300 bg-white px-8 py-4 text-base font-semibold text-slate-700 transition-colors hover:border-indigo-300 hover:bg-indigo-50/40 hover:text-slate-900"
             >
-              See How It Works
+              Verify Integrity
             </Link>
           </div>
         </section>

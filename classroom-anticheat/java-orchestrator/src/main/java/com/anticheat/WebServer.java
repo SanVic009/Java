@@ -5,6 +5,9 @@ import com.anticheat.model.ExamRequest;
 import com.anticheat.model.NotificationConfig;
 import com.anticheat.service.AnalysisClient;
 import com.anticheat.service.NotificationService;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.javalin.Javalin;
 import io.javalin.http.UploadedFile;
 import io.javalin.config.SizeUnit;
@@ -17,6 +20,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -35,10 +42,41 @@ public class WebServer {
 
     private final AnalysisClient client;
     private final String cvServiceUrl;
+    private final Path jobStoreRoot;
 
     public WebServer(String cvServiceUrl) {
         this.cvServiceUrl = cvServiceUrl;
         this.client = new AnalysisClient(cvServiceUrl);
+        this.jobStoreRoot = resolveJobStoreRoot();
+    }
+
+    private static Path resolveJobStoreRoot() {
+        Path cwd = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        Path cwdJobStore = cwd.resolve("job_store");
+        Path nestedRepoJobStore = cwd.resolve("classroom-anticheat").resolve("job_store");
+        Path parent = cwd.getParent();
+        Path parentJobStore = parent == null ? null : parent.resolve("job_store");
+
+        // Common case: launching from java-orchestrator while Python writes to ../job_store.
+        if (cwd.getFileName() != null
+                && "java-orchestrator".equals(cwd.getFileName().toString())
+                && parentJobStore != null
+                && Files.isDirectory(parentJobStore)) {
+            return parentJobStore;
+        }
+
+        // Common case: launching from workspace root (/.../Code/Java) while artifacts are in
+        // /.../Code/Java/classroom-anticheat/job_store.
+        if (Files.isDirectory(nestedRepoJobStore)) {
+            return nestedRepoJobStore;
+        }
+        if (Files.isDirectory(cwdJobStore)) {
+            return cwdJobStore;
+        }
+        if (parentJobStore != null && Files.isDirectory(parentJobStore)) {
+            return parentJobStore;
+        }
+        return cwdJobStore;
     }
 
     public void start(int port) {
@@ -71,6 +109,8 @@ public class WebServer {
                 return;
             }
 
+            String clientJobId = ctx.formParam("clientJobId");
+
             String examId = ctx.formParam("examId");
             if (examId == null || examId.isBlank()) {
                 examId = "exam_" + UUID.randomUUID().toString().substring(0, 8);
@@ -85,17 +125,24 @@ public class WebServer {
                     .examId(examId)
                     .videoPath(videoFile.filename())
                     .fpsSampling(5)
-                    .renderAnnotatedVideo(false) // Java will render Phase 3
-                    .phase1Only(true)            // Python only does CV Phase 1
+                    .renderAnnotatedVideo(true)  // Prefer Python's true annotated render
+                    .phase1Only(false)           // Run full Python pipeline for annotated output
                     .build();
 
             try {
                 String jobId = client.submitAnalysis(request);
+                persistClientJobIdMapping(clientJobId, jobId, examId);
 
                 // Start background task to await completion and send email
                 startBackgroundMonitor(jobId, request);
 
-                ctx.json(Map.of("jobId", jobId, "examId", examId));
+                Map<String, Object> response = new LinkedHashMap<>();
+                response.put("jobId", jobId);
+                response.put("examId", examId);
+                if (clientJobId != null && !clientJobId.isBlank()) {
+                    response.put("clientJobId", clientJobId.trim());
+                }
+                ctx.json(response);
             } catch (Exception e) {
                 System.err.println("[WebServer POST /api/analyze] Error submitting to Python CV: " + e.getMessage());
                 e.printStackTrace(System.err);
@@ -108,6 +155,14 @@ public class WebServer {
             try {
                 String javaState = jobStates.getOrDefault(jobId, STATE_PYTHON);
                 AnalysisClient.JobStatus status = client.getJobStatus(jobId);
+                Path jobDir = jobStoreRoot.resolve(jobId);
+                Path javaResultPath = jobDir.resolve("phase2_results_java.json");
+
+                // Recover completed state after Java server restart using persisted artifacts.
+                if (Files.exists(javaResultPath)) {
+                    javaState = STATE_COMPLETED;
+                    jobStates.put(jobId, STATE_COMPLETED);
+                }
 
                 // If Python is done but Java is still post-processing, keep it "running"
                 if (status.status.equalsIgnoreCase("completed") && javaState.equals(STATE_JAVA)) {
@@ -133,21 +188,16 @@ public class WebServer {
         app.get("/api/result/{jobId}", ctx -> {
             String jobId = ctx.pathParam("jobId");
             try {
-                String javaState = jobStates.getOrDefault(jobId, STATE_PYTHON);
-                if (!javaState.equals(STATE_COMPLETED)) {
-                    ctx.status(404).json(Map.of("error", "Results not ready yet. Current state: " + javaState));
-                    return;
-                }
-
-                Path jobDir = Paths.get("job_store").resolve(jobId);
+                Path jobDir = jobStoreRoot.resolve(jobId);
                 Path javaResultPath = jobDir.resolve("phase2_results_java.json");
-                
+
                 if (Files.exists(javaResultPath)) {
+                    jobStates.put(jobId, STATE_COMPLETED);
                     String content = Files.readString(javaResultPath, StandardCharsets.UTF_8);
                     ctx.contentType("application/json").result(content);
                 } else {
-                    // This shouldn't really happen if state is COMPLETED but we check anyway
-                    ctx.status(404).json(Map.of("error", "Result file missing on disk"));
+                    String javaState = jobStates.getOrDefault(jobId, STATE_PYTHON);
+                    ctx.status(404).json(Map.of("error", "Results not ready yet. Current state: " + javaState));
                 }
             } catch (Exception e) {
                 System.err.println("[WebServer GET /api/result/" + jobId + "] " + e.getMessage());
@@ -159,21 +209,16 @@ public class WebServer {
         app.get("/api/video/{jobId}", ctx -> {
             String jobId = ctx.pathParam("jobId");
             try {
-                AnalysisResponse result = client.getResult(jobId);
-                if (result.getAnnotatedVideo() != null && "ready".equals(result.getAnnotatedVideo().getStatus())) {
-                    String filePath = result.getAnnotatedVideo().getFilePath();
-                    // Map file path to Java-side output if it looks like the Python one
-                    if (filePath.contains("phase2_annotated.mp4")) {
-                        filePath = filePath.replace("phase2_annotated.mp4", "phase2_annotated_java.mp4");
-                    }
-                    Path videoPath = Paths.get(filePath);
-                    if (Files.exists(videoPath)) {
-                        ctx.writeSeekableStream(Files.newInputStream(videoPath), "video/mp4");
-                    } else {
-                        System.err.println("[WebServer GET /api/video/" + jobId + "] File not found: " + filePath);
-                        ctx.status(404).json(Map.of("error", "Video file not found on disk: " + filePath));
-                    }
+                Path jobDir = jobStoreRoot.resolve(jobId);
+                Path annotatedPy = jobDir.resolve("phase2_annotated.mp4");
+                Path annotatedJava = jobDir.resolve("phase2_annotated_java.mp4");
+
+                // Prefer Python's true annotated render; fallback to Java artifact if needed.
+                Path videoPath = Files.exists(annotatedPy) ? annotatedPy : annotatedJava;
+                if (Files.exists(videoPath)) {
+                    ctx.writeSeekableStream(Files.newInputStream(videoPath), "video/mp4");
                 } else {
+                    AnalysisResponse result = client.getResult(jobId);
                     String videoStatus = result.getAnnotatedVideo() == null ? "null" : result.getAnnotatedVideo().getStatus();
                     System.err.println("[WebServer GET /api/video/" + jobId + "] Annotated video not ready. Status: " + videoStatus);
                     ctx.status(404).json(Map.of("error", "Annotated video not ready (status: " + videoStatus + ")"));
@@ -184,6 +229,203 @@ public class WebServer {
                 ctx.status(500).json(Map.of("error", e.getMessage()));
             }
         });
+
+        app.post("/api/integrity/check", ctx -> {
+            String providedJobId = ctx.formParam("jobId");
+            UploadedFile uploadedFile = ctx.uploadedFile("file");
+            if (uploadedFile == null) {
+                uploadedFile = ctx.uploadedFile("video");
+            }
+
+            if (providedJobId == null || providedJobId.isBlank()) {
+                ctx.status(400).json(Map.of("error", "jobId is required"));
+                return;
+            }
+            if (uploadedFile == null) {
+                ctx.status(400).json(Map.of("error", "file is required"));
+                return;
+            }
+
+            try {
+                String resolvedJobId = resolveStoredJobId(providedJobId);
+                if (resolvedJobId == null) {
+                    ctx.status(404).json(Map.of("error", "Job ID not found in job_store"));
+                    return;
+                }
+
+                Path jobDir = jobStoreRoot.resolve(resolvedJobId);
+                String storedSha256 = readStoredPhase3Sha256(jobDir);
+                if (storedSha256 == null || storedSha256.isBlank()) {
+                    ctx.status(404).json(Map.of("error", "No stored phase3 SHA-256 found for this job"));
+                    return;
+                }
+
+                String uploadedSha256;
+                try (InputStream is = uploadedFile.content()) {
+                    uploadedSha256 = sha256Hex(is);
+                }
+
+                String clientComputedHash = ctx.formParam("clientSha256");
+                boolean hashMatch = storedSha256.equalsIgnoreCase(uploadedSha256);
+                String integrityStatus = hashMatch ? "untampered" : "tampered";
+
+                Map<String, Object> response = new LinkedHashMap<>();
+                response.put("providedJobId", providedJobId);
+                response.put("resolvedJobId", resolvedJobId);
+                response.put("storedSha256", storedSha256);
+                response.put("uploadedSha256", uploadedSha256);
+                response.put("integrityStatus", integrityStatus);
+                response.put("message", hashMatch
+                        ? "Hashes match. Untampered file."
+                        : "Hashes do not match. Tampered file.");
+                response.put("artifact", jobDir.resolve("phase2_annotated_java.mp4").toString());
+                if (clientComputedHash != null && !clientComputedHash.isBlank()) {
+                    response.put("clientSha256", clientComputedHash.trim());
+                    response.put("clientServerHashMatch", clientComputedHash.trim().equalsIgnoreCase(uploadedSha256));
+                }
+
+                ctx.json(response);
+            } catch (Exception e) {
+                System.err.println("[WebServer POST /api/integrity/check] " + e.getMessage());
+                e.printStackTrace(System.err);
+                ctx.status(500).json(Map.of("error", e.getMessage()));
+            }
+        });
+    }
+
+    private synchronized void persistClientJobIdMapping(String clientJobId, String actualJobId, String examId) throws Exception {
+        if (clientJobId == null || clientJobId.isBlank()) {
+            return;
+        }
+
+        String normalizedClientJobId = clientJobId.trim();
+        if (!isSafeJobId(normalizedClientJobId)) {
+            throw new IllegalArgumentException("clientJobId must be a single path segment without separators");
+        }
+
+        Files.createDirectories(jobStoreRoot);
+        Path mapPath = jobStoreRoot.resolve("client_job_id_map.json");
+
+        JsonObject root = new JsonObject();
+        if (Files.exists(mapPath)) {
+            JsonElement existing = JsonParser.parseString(Files.readString(mapPath, StandardCharsets.UTF_8));
+            if (existing.isJsonObject()) {
+                root = existing.getAsJsonObject();
+            }
+        }
+
+        JsonObject aliases = root.has("aliases") && root.get("aliases").isJsonObject()
+                ? root.getAsJsonObject("aliases")
+                : new JsonObject();
+        aliases.addProperty(normalizedClientJobId, actualJobId);
+        root.add("aliases", aliases);
+
+        JsonObject metadata = root.has("metadata") && root.get("metadata").isJsonObject()
+                ? root.getAsJsonObject("metadata")
+                : new JsonObject();
+        JsonObject current = metadata.has(actualJobId) && metadata.get(actualJobId).isJsonObject()
+                ? metadata.getAsJsonObject(actualJobId)
+                : new JsonObject();
+        current.addProperty("client_job_id", normalizedClientJobId);
+        current.addProperty("exam_id", examId);
+        current.addProperty("updated_at", Instant.now().toString());
+        metadata.add(actualJobId, current);
+        root.add("metadata", metadata);
+
+        Files.writeString(mapPath, GSON.toJson(root), StandardCharsets.UTF_8);
+    }
+
+    private String resolveStoredJobId(String providedJobId) {
+        if (providedJobId == null || providedJobId.isBlank()) {
+            return null;
+        }
+
+        String normalized = providedJobId.trim();
+        if (!isSafeJobId(normalized)) {
+            return null;
+        }
+
+        Path directJobDir = jobStoreRoot.resolve(normalized);
+        if (Files.isDirectory(directJobDir)) {
+            return normalized;
+        }
+
+        Path mapPath = jobStoreRoot.resolve("client_job_id_map.json");
+        if (!Files.exists(mapPath)) {
+            return null;
+        }
+
+        try {
+            JsonElement rootEl = JsonParser.parseString(Files.readString(mapPath, StandardCharsets.UTF_8));
+            if (!rootEl.isJsonObject()) {
+                return null;
+            }
+            JsonObject aliases = rootEl.getAsJsonObject().getAsJsonObject("aliases");
+            if (aliases == null || !aliases.has(normalized)) {
+                return null;
+            }
+            String resolved = aliases.get(normalized).getAsString();
+            if (!isSafeJobId(resolved)) {
+                return null;
+            }
+            return Files.isDirectory(jobStoreRoot.resolve(resolved)) ? resolved : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean isSafeJobId(String jobId) {
+        if (jobId == null || jobId.isBlank()) {
+            return false;
+        }
+        return !jobId.contains("/") && !jobId.contains("\\") && !jobId.contains("..");
+    }
+
+    private String readStoredPhase3Sha256(Path jobDir) throws Exception {
+        Path integrityPath = jobDir.resolve("integrity_phase3.json");
+        if (Files.exists(integrityPath)) {
+            JsonElement integrityEl = JsonParser.parseString(Files.readString(integrityPath, StandardCharsets.UTF_8));
+            if (integrityEl.isJsonObject() && integrityEl.getAsJsonObject().has("sha256")) {
+                return integrityEl.getAsJsonObject().get("sha256").getAsString();
+            }
+        }
+
+        Path summaryPath = jobDir.resolve("postcv_java_summary.json");
+        if (Files.exists(summaryPath)) {
+            JsonElement summaryEl = JsonParser.parseString(Files.readString(summaryPath, StandardCharsets.UTF_8));
+            if (summaryEl.isJsonObject() && summaryEl.getAsJsonObject().has("phase3_sha256")) {
+                return summaryEl.getAsJsonObject().get("phase3_sha256").getAsString();
+            }
+        }
+
+        Path artifactPath = jobDir.resolve("phase2_annotated_java.mp4");
+        if (Files.exists(artifactPath)) {
+            return sha256Hex(artifactPath);
+        }
+
+        return null;
+    }
+
+    private static String sha256Hex(Path filePath) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream inputStream = Files.newInputStream(filePath)) {
+            byte[] buf = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buf)) != -1) {
+                digest.update(buf, 0, bytesRead);
+            }
+        }
+        return HexFormat.of().formatHex(digest.digest());
+    }
+
+    private static String sha256Hex(InputStream inputStream) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] buf = new byte[8192];
+        int bytesRead;
+        while ((bytesRead = inputStream.read(buf)) != -1) {
+            digest.update(buf, 0, bytesRead);
+        }
+        return HexFormat.of().formatHex(digest.digest());
     }
 
     private void startBackgroundMonitor(String jobId, ExamRequest request) {
@@ -200,7 +442,7 @@ public class WebServer {
                 jobStates.put(jobId, STATE_JAVA);
 
                 // 2. Run Java post-CV pipeline (Scoring + Rendering + Snapshots)
-                Path jobDir = Paths.get("job_store").resolve(jobId).toAbsolutePath().normalize();
+                Path jobDir = jobStoreRoot.resolve(jobId).toAbsolutePath().normalize();
                 JavaPostCvAllRunner javaRunner = new JavaPostCvAllRunner();
                 AnalysisResponse javaResponse = javaRunner.run(jobDir, request.getExamId());
                 

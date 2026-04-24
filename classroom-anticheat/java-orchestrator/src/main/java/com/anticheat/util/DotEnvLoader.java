@@ -33,6 +33,9 @@ public class DotEnvLoader {
         Path[] candidates = {
             searchDir.resolve(".env"),
             searchDir.getParent() != null ? searchDir.getParent().resolve(".env") : null,
+            searchDir.resolve("classroom-anticheat").resolve(".env"),
+            searchDir.resolve("classroom-anticheat").resolve("java-orchestrator").resolve(".env"),
+            searchDir.resolve("java-orchestrator").resolve(".env"),
         };
         for (Path candidate : candidates) {
             if (candidate != null && Files.isRegularFile(candidate)) {
@@ -73,6 +76,13 @@ public class DotEnvLoader {
             }
 
             if (!vars.isEmpty()) {
+                // Always set JVM system properties as a portable fallback.
+                // Some Java runtimes block reflective mutation of System.getenv.
+                for (Map.Entry<String, String> e : vars.entrySet()) {
+                    if (System.getProperty(e.getKey()) == null) {
+                        System.setProperty(e.getKey(), e.getValue());
+                    }
+                }
                 injectIntoEnvironment(vars);
                 System.out.printf("[DotEnvLoader] Loaded %d variable(s) from %s%n", vars.size(), envFile);
             }

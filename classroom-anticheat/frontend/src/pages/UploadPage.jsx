@@ -4,19 +4,20 @@ import TopBar from '../components/TopBar';
 import GlassCard from '../components/GlassCard';
 import {
   API_BASE_URL,
+  buildApiUrl,
   EMPTY_RESULT,
   formatPercent,
   formatSeconds,
   normalizeSignal,
   normalizeResult,
   parseBackendPayload,
-  resolveVideoUrl,
   signalPillTone,
 } from '../lib/analysisUtils';
 
 export default function UploadPage() {
   const [dragOver, setDragOver] = useState(false);
   const [file, setFile] = useState(null);
+  const [clientJobId, setClientJobId] = useState('');
   const [examId, setExamId] = useState('');
   const [renderAnnotatedVideo, setRenderAnnotatedVideo] = useState(true);
   const [status, setStatus] = useState('idle'); // idle | processing | results | error
@@ -72,8 +73,12 @@ export default function UploadPage() {
       const formData = new FormData();
       formData.append('video', file);
       formData.append('examId', examId.trim());
+      if (clientJobId.trim()) {
+        formData.append('clientJobId', clientJobId.trim());
+      }
 
-      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+      const analyzeUrl = buildApiUrl('/api/analyze');
+      const response = await fetch(analyzeUrl, {
         method: 'POST',
         body: formData,
       });
@@ -83,8 +88,11 @@ export default function UploadPage() {
       try {
         payload = JSON.parse(rawText);
       } catch (parseErr) {
-        console.error('[Analyze] Response is not valid JSON. Status:', response.status, 'Body:', rawText);
-        throw new Error(`Server returned non-JSON response (HTTP ${response.status}). Check the Java server logs.`);
+        console.error('[Analyze] Response is not valid JSON. URL:', analyzeUrl, 'Status:', response.status, 'Body:', rawText);
+        const hint = response.status === 404
+          ? ` Endpoint not found at ${analyzeUrl}. Check VITE_API_BASE_URL and Java --web startup.`
+          : '';
+        throw new Error(`Server returned non-JSON response (HTTP ${response.status}).${hint}`);
       }
 
       if (!response.ok) {
@@ -130,7 +138,7 @@ export default function UploadPage() {
     const pollStatus = async () => {
       if (cancelled) return;
       try {
-        const response = await fetch(`${API_BASE_URL}/api/status/${jobId}`);
+        const response = await fetch(buildApiUrl(`/api/status/${jobId}`));
         const rawText = await response.text();
         let payload;
         try {
@@ -157,7 +165,7 @@ export default function UploadPage() {
         if (nextStatus === 'failed') {
           let failureMessage = nextMessage || 'Analysis failed.';
           try {
-            const failedResultResp = await fetch(`${API_BASE_URL}/api/result/${jobId}`);
+            const failedResultResp = await fetch(buildApiUrl(`/api/result/${jobId}`));
             const failedText = await failedResultResp.text();
             let failedPayload;
             try { failedPayload = JSON.parse(failedText); } catch { failedPayload = {}; }
@@ -181,7 +189,7 @@ export default function UploadPage() {
 
         if (nextStatus === 'completed') {
           try {
-            const resultResponse = await fetch(`${API_BASE_URL}/api/result/${jobId}`);
+            const resultResponse = await fetch(buildApiUrl(`/api/result/${jobId}`));
             const resultText = await resultResponse.text();
             let resultPayload;
             try {
@@ -261,31 +269,6 @@ export default function UploadPage() {
     };
   }, [jobId, status]);
 
-  useEffect(() => {
-    if (status !== 'results' || !jobId || result.annotated_video_status !== 'rendering') {
-      return undefined;
-    }
-
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/result/${jobId}`);
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok || cancelled) return;
-        const parsed = parseBackendPayload(payload);
-        const normalizedTracks = normalizeResult(payload);
-        if (!cancelled) setResult({ ...parsed, results: normalizedTracks });
-      } catch (e) {
-        console.error('[VideoRefresh] Error refreshing annotated video status:', e);
-      }
-    }, 5000);
-
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [jobId, result.annotated_video_status, status]);
-
   return (
     <PageContainer>
       <TopBar
@@ -326,26 +309,7 @@ export default function UploadPage() {
                   <p className="mt-3 text-lg font-medium text-emerald-700">No suspicious patterns detected</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-                  <div className="rounded-xl border border-indigo-100 bg-gradient-to-b from-indigo-50/70 to-white p-3">
-                    {result.annotated_video_status === 'rendering' ? (
-                      <div className="rounded-lg p-8 text-center text-slate-600">
-                        Annotated video still rendering...
-                      </div>
-                    ) : jobId ? (
-                      <video
-                        controls
-                        className="w-full rounded-lg"
-                        src={resolveVideoUrl(jobId)}
-                      />
-                    ) : (
-                      <div className="rounded-lg p-8 text-center text-slate-600">
-                        Annotated video not available.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="max-h-[520px] overflow-y-auto rounded-xl border border-indigo-100 bg-gradient-to-b from-indigo-50/55 to-white p-4">
+                <div className="max-h-[520px] overflow-y-auto rounded-xl border border-indigo-100 bg-gradient-to-b from-indigo-50/55 to-white p-4">
                     <div className="space-y-4">
                       {flaggedTracks.map((track) => (
                         <article key={track.track_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -386,7 +350,6 @@ export default function UploadPage() {
                         </article>
                       ))}
                     </div>
-                  </div>
                 </div>
               )}
 
@@ -432,6 +395,18 @@ export default function UploadPage() {
                   placeholder="e.g. exam_room_a_2026"
                   className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
                 />
+              </div>
+
+              <div className="mt-6">
+                <label className="mb-2 block text-sm text-slate-700">User Job ID (optional)</label>
+                <input
+                  type="text"
+                  value={clientJobId}
+                  onChange={(e) => setClientJobId(e.target.value)}
+                  placeholder="e.g. roomA_midterm_001"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                />
+                <p className="mt-2 text-xs text-slate-500">This ID is saved by backend and mapped to the generated job-store ID.</p>
               </div>
 
               <div className="mt-7 flex items-start gap-4">

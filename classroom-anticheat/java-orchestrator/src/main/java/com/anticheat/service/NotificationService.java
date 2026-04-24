@@ -15,6 +15,10 @@ import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -53,13 +57,13 @@ public class NotificationService {
 
         String envName = config.smtp.fromAddressEnv;
         if (envName != null && !envName.isBlank()) {
-            String envValue = System.getenv(envName);
+            String envValue = readEnvOrProperty(envName);
             if (envValue != null && !envValue.isBlank()) {
                 return envValue.trim();
             }
         }
 
-        String fallbackEnv = System.getenv("SMTP_FROM_ADDRESS");
+        String fallbackEnv = readEnvOrProperty("SMTP_FROM_ADDRESS");
         if (fallbackEnv != null && !fallbackEnv.isBlank()) {
             return fallbackEnv.trim();
         }
@@ -77,7 +81,7 @@ public class NotificationService {
 
     private List<String> resolveRecipients(NotificationConfig config) {
         if (config.smtp != null && config.smtp.recipientsEnv != null && !config.smtp.recipientsEnv.isBlank()) {
-            String raw = System.getenv(config.smtp.recipientsEnv);
+            String raw = readEnvOrProperty(config.smtp.recipientsEnv);
             if (raw != null && !raw.isBlank()) {
                 return Arrays.stream(raw.split(","))
                         .map(String::trim)
@@ -86,7 +90,7 @@ public class NotificationService {
             }
         }
 
-        String rawFallback = System.getenv("ALERT_RECIPIENTS");
+        String rawFallback = readEnvOrProperty("ALERT_RECIPIENTS");
         if (rawFallback != null && !rawFallback.isBlank()) {
             return Arrays.stream(rawFallback.split(","))
                     .map(String::trim)
@@ -103,12 +107,20 @@ public class NotificationService {
             if (c == null || c.isBlank()) {
                 continue;
             }
-            String v = System.getenv(c);
+            String v = readEnvOrProperty(c);
             if (v != null && !v.isBlank()) {
                 return v.trim();
             }
         }
         return defaultValue;
+    }
+
+    private String readEnvOrProperty(String key) {
+        String fromEnv = System.getenv(key);
+        if (fromEnv != null && !fromEnv.isBlank()) {
+            return fromEnv;
+        }
+        return System.getProperty(key);
     }
 
     /**
@@ -208,8 +220,68 @@ public class NotificationService {
         htmlPart.setContent(buildSummaryEmailBody(events, examId), "text/html; charset=utf-8");
         multipart.addBodyPart(htmlPart);
 
+        Optional<String> jobId = events.stream()
+                .map(e -> e.jobId)
+                .filter(s -> s != null && !s.isBlank())
+                .findFirst();
+        if (jobId.isPresent()) {
+            Optional<Path> annotatedVideoPath = resolveAnnotatedVideoPath(jobId.get());
+            if (annotatedVideoPath.isPresent()) {
+                MimeBodyPart attachment = new MimeBodyPart();
+                try {
+                    attachment.attachFile(annotatedVideoPath.get().toFile());
+                    attachment.setFileName(annotatedVideoPath.get().getFileName().toString());
+                    attachment.setDisposition(Message.ATTACHMENT);
+                    multipart.addBodyPart(attachment);
+                } catch (IOException e) {
+                    throw new MessagingException("Failed to attach annotated video", e);
+                }
+            } else {
+                System.out.printf("[Notification] Annotated video not found for job %s; sending email without attachment.%n", jobId.get());
+            }
+        }
+
         message.setContent(multipart);
         Transport.send(message);
+    }
+
+    private Optional<Path> resolveAnnotatedVideoPath(String jobId) {
+        Path cwd = Paths.get(System.getProperty("user.dir")).toAbsolutePath().normalize();
+        Path cwdJobStore = cwd.resolve("job_store");
+        Path nestedRepoJobStore = cwd.resolve("classroom-anticheat").resolve("job_store");
+        Path parent = cwd.getParent();
+        Path parentJobStore = parent == null ? null : parent.resolve("job_store");
+
+        Path jobStoreRoot;
+        if (cwd.getFileName() != null
+                && "java-orchestrator".equals(cwd.getFileName().toString())
+                && parentJobStore != null
+                && Files.isDirectory(parentJobStore)) {
+            jobStoreRoot = parentJobStore;
+        } else if (Files.isDirectory(nestedRepoJobStore)) {
+            // Launching from workspace root (/.../Code/Java) while artifacts are under
+            // /.../Code/Java/classroom-anticheat/job_store.
+            jobStoreRoot = nestedRepoJobStore;
+        } else if (Files.isDirectory(cwdJobStore)) {
+            jobStoreRoot = cwdJobStore;
+        } else if (parentJobStore != null && Files.isDirectory(parentJobStore)) {
+            jobStoreRoot = parentJobStore;
+        } else {
+            jobStoreRoot = cwdJobStore;
+        }
+
+        Path jobDir = jobStoreRoot.resolve(jobId);
+        Path pyAnnotated = jobDir.resolve("phase2_annotated.mp4");
+        if (Files.exists(pyAnnotated) && Files.isRegularFile(pyAnnotated)) {
+            return Optional.of(pyAnnotated);
+        }
+
+        Path javaAnnotated = jobDir.resolve("phase2_annotated_java.mp4");
+        if (Files.exists(javaAnnotated) && Files.isRegularFile(javaAnnotated)) {
+            return Optional.of(javaAnnotated);
+        }
+
+        return Optional.empty();
     }
 
     private String buildSummaryEmailBody(List<ViolationEvent> events, String examId) {
@@ -217,6 +289,7 @@ public class NotificationService {
         sb.append("<html><body style='font-family: sans-serif;'>");
         sb.append("<h2 style='color: #d9534f;'>Classroom Anti-Cheat System</h2>");
         sb.append("<p>The system has detected potential violations. Please review the details below:</p>");
+        sb.append("<p><b>Annotated video is attached to this email.</b></p>");
         sb.append("<ul>");
         sb.append(String.format("<li><b>Exam ID:</b> %s</li>", examId));
         sb.append(String.format("<li><b>Total Violations:</b> %d</li>", events.size()));
@@ -231,9 +304,6 @@ public class NotificationService {
             sb.append(String.format("<li><b>Dominant Signals:</b> %s</li>", dominant));
             sb.append(String.format("<li><b>Detected At:</b> %s</li>", event.detectedAt));
             sb.append("</ul>");
-            sb.append("<p><b>Review Clip:</b></p>");
-            sb.append(String.format("<p><a href='%s' style='display: inline-block; padding: 8px 15px; background: #007bff; color: white; text-decoration: none; border-radius: 3px;'>Watch Clip</a></p>", event.clipUrl));
-            sb.append(String.format("<p><video src='%s' controls width='320' height='240' style='background: black; max-width: 100%%;'></video></p>", event.clipUrl));
             sb.append("</div>");
         }
         

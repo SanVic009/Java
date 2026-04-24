@@ -1,4 +1,16 @@
-export const API_BASE_URL = 'http://localhost:7070';
+const RAW_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localhost:7070').trim();
+export const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, '');
+
+export function buildApiUrl(path) {
+  let normalizedPath = path.startsWith('/') ? path : `/${path}`;
+
+  // If base already includes /api, avoid accidentally creating /api/api/* URLs.
+  if (API_BASE_URL.endsWith('/api') && normalizedPath.startsWith('/api/')) {
+    normalizedPath = normalizedPath.slice(4);
+  }
+
+  return `${API_BASE_URL}${normalizedPath}`;
+}
 
 export const EMPTY_RESULT = {
   exam_id: '',
@@ -45,15 +57,15 @@ export function formatPercent(value) {
  */
 export function resolveVideoUrl(jobId) {
   if (!jobId) return '';
-  return `${API_BASE_URL}/api/video/${jobId}`;
+  return buildApiUrl(`/api/video/${jobId}`);
 }
 
 // Keep the old helper for backward compat but prefer resolveVideoUrl
 export function resolveVideoPath(path) {
   if (!path) return '';
   if (/^https?:\/\//i.test(path)) return path;
-  if (path.startsWith('/')) return `${API_BASE_URL}${path}`;
-  return `${API_BASE_URL}/${path}`;
+  if (path.startsWith('/')) return buildApiUrl(path);
+  return buildApiUrl(path);
 }
 
 export function parseBackendPayload(payload) {

@@ -14,6 +14,25 @@ from dataclasses import dataclass
 from config import config
 
 
+def _resolve_mediapipe_face_mesh_module():
+    """Resolve MediaPipe face_mesh module across packaging variants."""
+    try:
+        return mp.solutions.face_mesh
+    except AttributeError:
+        pass
+
+    # Some builds expose solutions under mediapipe.python.solutions.
+    try:
+        from mediapipe.python import solutions as mp_solutions  # type: ignore
+
+        return mp_solutions.face_mesh
+    except Exception as exc:
+        raise RuntimeError(
+            "MediaPipe face mesh is unavailable. Ensure mediapipe is installed with "
+            "the solutions API."
+        ) from exc
+
+
 def _resolve_model_path(model_name: str) -> str:
     candidates = [
         Path(__file__).resolve().parents[1] / model_name,
@@ -79,7 +98,7 @@ class PoseEstimator:
             max_faces: Maximum faces to detect per crop
             min_detection_confidence: Minimum detection confidence
         """
-        self.mp_face_mesh = mp.solutions.face_mesh
+        self.mp_face_mesh = _resolve_mediapipe_face_mesh_module()
         self._frame_width: int = 0
         self._frame_height: int = 0
         face_mesh_confidence = float(getattr(config, "FACE_MESH_MIN_DETECTION_CONFIDENCE", min_detection_confidence))

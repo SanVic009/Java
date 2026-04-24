@@ -12,6 +12,7 @@ Constraints:
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +41,7 @@ def _resolve_ffmpeg_binary() -> Optional[str]:
     """
     Resolve a usable ffmpeg executable, avoiding broken ones.
     """
-    import os, shutil, subprocess
+    import os, shutil
     candidates = []
     env_bin = os.environ.get("FFMPEG_BINARY")
     if env_bin:
@@ -137,7 +138,8 @@ class VideoVisualizer:
 
         # ---- Build sample score/EMA/confidence lookups from phase2_frame_scores.jsonl ----
         # sample_conf[(tid, frame_idx)] = {final_score, confidence_weight, ema}
-        alpha = float(cfg.EMA_ALPHA)
+        # Backward-compatible config lookup: older configs expose EMA_ALPHA_BASE.
+        alpha = float(getattr(cfg, "EMA_ALPHA", getattr(cfg, "EMA_ALPHA_BASE", 0.2)))
         sample_scores: DefaultDict[int, Dict[int, Tuple[float, float]]] = defaultdict(dict)
         # frame_idx estimates must be consistent with Phase 1/2 timestamp usage.
         if phase2_frame_scores_path.exists():
